@@ -1,4 +1,9 @@
-import { EventEnvelope, RecordedEventEnvelope } from '../types/event-envelope';
+import {
+  EventEnvelope,
+  EventPosition,
+  RecordedEventEnvelope,
+  ResolvedEventEnvelope,
+} from '../types/event-envelope';
 
 /**
  * Injection token for the event store adapter.
@@ -45,6 +50,58 @@ export interface ReadStreamOptions {
 }
 
 /**
+ * Options for subscribing to a stream.
+ */
+export interface SubscribeToStreamOptions {
+  /**
+   * Starting revision within the stream.
+   * Use 'start' for beginning, 'end' for live-only.
+   * @default 'start'
+   */
+  fromRevision?: bigint | 'start' | 'end';
+}
+
+/**
+ * Options for subscribing to the global $all stream.
+ */
+export interface SubscribeToAllOptions {
+  /**
+   * Starting position in the global log.
+   * Use 'start' for beginning, 'end' for live-only.
+   * @default 'start'
+   */
+  fromPosition?: EventPosition | 'start' | 'end';
+
+  /**
+   * Filter by event type prefixes.
+   * Example: ['Order', 'Payment'] matches OrderCreated, PaymentReceived, etc.
+   */
+  filterByEventType?: string[];
+
+  /**
+   * Filter by stream name prefixes.
+   * Example: ['Order-', 'User-'] matches Order-123, User-456, etc.
+   */
+  filterByStreamName?: string[];
+}
+
+/**
+ * Active subscription handle.
+ * Wraps async iterable with lifecycle management.
+ */
+export interface Subscription {
+  /**
+   * Async iterable of resolved events.
+   */
+  events: AsyncIterable<ResolvedEventEnvelope>;
+
+  /**
+   * Unsubscribe and clean up resources.
+   */
+  unsubscribe(): Promise<void>;
+}
+
+/**
  * Abstract adapter interface for event store implementations.
  * Implementations should handle connection management and serialization.
  */
@@ -76,4 +133,26 @@ export interface IEventStoreAdapter {
     streamId: string,
     options?: ReadStreamOptions
   ): AsyncIterable<RecordedEventEnvelope>;
+
+  /**
+   * Subscribe to a single stream (catch-up subscription).
+   * Receives historical events from the starting position, then continues with live events.
+   *
+   * @param streamId - Stream to subscribe to
+   * @param options - Subscription options (starting position)
+   * @returns Subscription handle with events iterable and unsubscribe method
+   */
+  subscribeToStream(
+    streamId: string,
+    options?: SubscribeToStreamOptions
+  ): Subscription;
+
+  /**
+   * Subscribe to all events across all streams (catch-up subscription).
+   * Useful for building cross-aggregate read models and projections.
+   *
+   * @param options - Subscription options with optional filters
+   * @returns Subscription handle with events iterable and unsubscribe method
+   */
+  subscribeToAll(options?: SubscribeToAllOptions): Subscription;
 }

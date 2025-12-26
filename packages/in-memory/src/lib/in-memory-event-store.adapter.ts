@@ -1,10 +1,15 @@
 import { Injectable } from '@nestjs/common';
+import { EventEmitter } from 'events';
 import {
   IEventStoreAdapter,
   EventEnvelope,
   RecordedEventEnvelope,
+  ResolvedEventEnvelope,
   AppendResult,
   ReadStreamOptions,
+  Subscription,
+  SubscribeToStreamOptions,
+  SubscribeToAllOptions,
 } from '@pbuda/event-store-core';
 
 /**
@@ -16,6 +21,9 @@ import {
 @Injectable()
 export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
   private readonly streams = new Map<string, RecordedEventEnvelope[]>();
+  private readonly allEvents: RecordedEventEnvelope[] = [];
+  private readonly emitter = new EventEmitter();
+  private globalPosition = 0n;
 
   async appendToStream(
     streamId: string,
@@ -34,19 +42,30 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
     }
 
     const recordedEvents: RecordedEventEnvelope[] = events.map(
-      (event, index) => ({
-        streamId,
-        id: event.id,
-        revision: BigInt(stream.length + index),
-        type: event.type,
-        created: new Date(),
-        data: event.data,
-        metadata: event.metadata,
-      })
+      (event, index) => {
+        const position = this.globalPosition++;
+        return {
+          streamId,
+          id: event.id,
+          revision: BigInt(stream.length + index),
+          type: event.type,
+          created: new Date(),
+          data: event.data,
+          metadata: event.metadata,
+          position: { commit: position, prepare: position },
+        };
+      }
     );
 
     stream.push(...recordedEvents);
+    this.allEvents.push(...recordedEvents);
     this.streams.set(streamId, stream);
+
+    // Emit for subscriptions
+    for (const event of recordedEvents) {
+      this.emitter.emit('event', event);
+      this.emitter.emit(`stream:${streamId}`, event);
+    }
 
     return {
       nextExpectedRevision: BigInt(stream.length),
@@ -89,6 +108,166 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
     }
   }
 
+  subscribeToStream(
+    streamId: string,
+    options?: SubscribeToStreamOptions
+  ): Subscription {
+    const fromRevision = options?.fromRevision ?? 'start';
+    let cancelled = false;
+
+    // Capture references to avoid 'this' aliasing
+    const streams = this.streams;
+    const emitter = this.emitter;
+
+    const generateEvents = async function* (): AsyncIterable<ResolvedEventEnvelope> {
+      const stream = streams.get(streamId) ?? [];
+
+      // Determine starting point
+      let startIndex: number;
+      if (fromRevision === 'start') {
+        startIndex = 0;
+      } else if (fromRevision === 'end') {
+        startIndex = stream.length;
+      } else {
+        startIndex = Number(fromRevision) + 1;
+      }
+
+      // Yield historical events
+      for (let i = startIndex; i < stream.length && !cancelled; i++) {
+        yield { event: stream[i], commitPosition: stream[i].position?.commit };
+      }
+
+      // Wait for live events
+      if (!cancelled) {
+        const eventQueue: RecordedEventEnvelope[] = [];
+        let resolveWait: (() => void) | null = null;
+
+        const handler = (event: RecordedEventEnvelope) => {
+          eventQueue.push(event);
+          if (resolveWait) {
+            resolveWait();
+            resolveWait = null;
+          }
+        };
+
+        emitter.on(`stream:${streamId}`, handler);
+
+        try {
+          while (!cancelled) {
+            const event = eventQueue.shift();
+            if (event) {
+              yield { event, commitPosition: event.position?.commit };
+            } else {
+              await new Promise<void>((resolve) => {
+                resolveWait = resolve;
+              });
+            }
+          }
+        } finally {
+          emitter.off(`stream:${streamId}`, handler);
+        }
+      }
+    };
+
+    return {
+      events: generateEvents(),
+      unsubscribe: async () => {
+        cancelled = true;
+      },
+    };
+  }
+
+  subscribeToAll(options?: SubscribeToAllOptions): Subscription {
+    const fromPosition = options?.fromPosition ?? 'start';
+    const filterByEventType = options?.filterByEventType;
+    const filterByStreamName = options?.filterByStreamName;
+    let cancelled = false;
+
+    // Capture references to avoid 'this' aliasing
+    const allEvents = this.allEvents;
+    const emitter = this.emitter;
+
+    const matchesFilters = (event: RecordedEventEnvelope): boolean => {
+      if (filterByEventType && filterByEventType.length > 0) {
+        if (!filterByEventType.some((prefix) => event.type.startsWith(prefix))) {
+          return false;
+        }
+      }
+      if (filterByStreamName && filterByStreamName.length > 0) {
+        if (!filterByStreamName.some((prefix) => event.streamId.startsWith(prefix))) {
+          return false;
+        }
+      }
+      return true;
+    };
+
+    const generateEvents = async function* (): AsyncIterable<ResolvedEventEnvelope> {
+      // Determine starting point
+      let startIndex: number;
+      if (fromPosition === 'start') {
+        startIndex = 0;
+      } else if (fromPosition === 'end') {
+        startIndex = allEvents.length;
+      } else {
+        // Find index by commit position
+        startIndex = allEvents.findIndex(
+          (e) => e.position && e.position.commit > fromPosition.commit
+        );
+        if (startIndex === -1) {
+          startIndex = allEvents.length;
+        }
+      }
+
+      // Yield historical events
+      for (let i = startIndex; i < allEvents.length && !cancelled; i++) {
+        const event = allEvents[i];
+        if (matchesFilters(event)) {
+          yield { event, commitPosition: event.position?.commit };
+        }
+      }
+
+      // Wait for live events
+      if (!cancelled) {
+        const eventQueue: RecordedEventEnvelope[] = [];
+        let resolveWait: (() => void) | null = null;
+
+        const handler = (event: RecordedEventEnvelope) => {
+          if (matchesFilters(event)) {
+            eventQueue.push(event);
+            if (resolveWait) {
+              resolveWait();
+              resolveWait = null;
+            }
+          }
+        };
+
+        emitter.on('event', handler);
+
+        try {
+          while (!cancelled) {
+            const event = eventQueue.shift();
+            if (event) {
+              yield { event, commitPosition: event.position?.commit };
+            } else {
+              await new Promise<void>((resolve) => {
+                resolveWait = resolve;
+              });
+            }
+          }
+        } finally {
+          emitter.off('event', handler);
+        }
+      }
+    };
+
+    return {
+      events: generateEvents(),
+      unsubscribe: async () => {
+        cancelled = true;
+      },
+    };
+  }
+
   /**
    * Get all events from a specific stream.
    * Useful for testing assertions.
@@ -106,10 +285,21 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
   }
 
   /**
-   * Clear all streams.
+   * Get all events across all streams in global order.
+   * Useful for testing assertions.
+   */
+  getAllEvents(): RecordedEventEnvelope[] {
+    return [...this.allEvents];
+  }
+
+  /**
+   * Clear all streams and reset state.
    * Useful for test cleanup.
    */
   clear(): void {
     this.streams.clear();
+    this.allEvents.length = 0;
+    this.globalPosition = 0n;
+    this.emitter.removeAllListeners();
   }
 }
