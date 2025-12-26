@@ -10,7 +10,8 @@
       "git": {
         "commit": true,
         "tag": true,
-        "commitMessage": "chore(release): v{version}"
+        "push": true,
+        "commitMessage": "Release v{version}"
       }
     },
     "changelog": {
