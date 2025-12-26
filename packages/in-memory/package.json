@@ -1,6 +1,6 @@
 {
   "name": "@pbuda/event-store-in-memory",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "private": true,
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -22,6 +22,6 @@
   },
   "peerDependencies": {
     "@nestjs/common": "^11.0.0",
-    "@pbuda/event-store-core": "^0.0.1"
+    "@pbuda/event-store-core": "0.1.0"
   }
 }

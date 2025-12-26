@@ -1,5 +1,30 @@
 {
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
+  "release": {
+    "projects": ["event-store-core", "in-memory"],
+    "projectsRelationship": "fixed",
+    "version": {
+      "preVersionCommand": "npx nx run-many -t build -p event-store-core in-memory",
+      "conventionalCommits": true,
+      "fallbackCurrentVersionResolver": "disk",
+      "git": {
+        "commit": true,
+        "tag": true,
+        "commitMessage": "chore(release): v{version}"
+      }
+    },
+    "changelog": {
+      "projectChangelogs": false,
+      "workspaceChangelog": {
+        "file": "CHANGELOG.md",
+        "createRelease": "github"
+      },
+      "git": {
+        "commit": true,
+        "commitMessage": "chore(release): v{version} changelog"
+      }
+    }
+  },
   "namedInputs": {
     "default": ["{projectRoot}/**/*", "sharedGlobals"],
     "production": [
