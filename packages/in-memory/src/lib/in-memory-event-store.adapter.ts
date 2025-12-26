@@ -7,6 +7,12 @@ import {
   ReadStreamOptions,
 } from '@pbuda/event-store-core';
 
+/**
+ * In-memory implementation of IEventStoreAdapter.
+ *
+ * Useful for testing and development scenarios where a real event store
+ * is not needed. Events are stored in memory and lost when the process exits.
+ */
 @Injectable()
 export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
   private readonly streams = new Map<string, RecordedEventEnvelope[]>();
@@ -83,15 +89,26 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
     }
   }
 
-  // Helper methods for testing/debugging
+  /**
+   * Get all events from a specific stream.
+   * Useful for testing assertions.
+   */
   getStream(streamId: string): RecordedEventEnvelope[] {
     return this.streams.get(streamId) ?? [];
   }
 
+  /**
+   * Get all streams and their events.
+   * Useful for testing assertions.
+   */
   getAllStreams(): Map<string, RecordedEventEnvelope[]> {
     return new Map(this.streams);
   }
 
+  /**
+   * Clear all streams.
+   * Useful for test cleanup.
+   */
   clear(): void {
     this.streams.clear();
   }

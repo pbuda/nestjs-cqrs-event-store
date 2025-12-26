@@ -1,8 +1,8 @@
 import { Module } from '@nestjs/common';
 import { EventStoreModule } from '@pbuda/event-store-core';
+import { InMemoryEventStoreAdapter } from '@pbuda/event-store-in-memory';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
-import { InMemoryEventStoreAdapter } from './adapters/in-memory-event-store.adapter';
 import { TodoModule } from './todo/todo.module';
 
 @Module({

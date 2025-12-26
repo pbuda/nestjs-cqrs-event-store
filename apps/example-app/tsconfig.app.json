@@ -13,6 +13,9 @@
   "exclude": [],
   "references": [
     {
+      "path": "../../packages/in-memory/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/core/tsconfig.lib.json"
     }
   ]
