@@ -1,0 +1,16 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compileOnSave": false,
+  "files": [],
+  "references": [
+    {
+      "path": "./packages/core"
+    },
+    {
+      "path": "./apps/example-app-e2e"
+    },
+    {
+      "path": "./apps/example-app"
+    }
+  ]
+}

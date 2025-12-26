@@ -1,0 +1,27 @@
+{
+  "name": "@nestjs-cqrs-event-store/example-app-e2e",
+  "version": "0.0.1",
+  "private": true,
+  "nx": {
+    "name": "example-app-e2e",
+    "implicitDependencies": [
+      "example-app"
+    ],
+    "targets": {
+      "e2e": {
+        "executor": "@nx/jest:jest",
+        "outputs": [
+          "{projectRoot}/test-output/jest/coverage"
+        ],
+        "options": {
+          "jestConfig": "apps/example-app-e2e/jest.config.cts",
+          "passWithNoTests": true
+        },
+        "dependsOn": [
+          "example-app:build",
+          "example-app:serve"
+        ]
+      }
+    }
+  }
+}
