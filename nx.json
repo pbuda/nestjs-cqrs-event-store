@@ -2,13 +2,13 @@
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
   "release": {
     "projects": [
-      "event-store-core",
-      "in-memory",
-      "@pbuda/event-store-kurrentdb"
+      "@pbuda/nestjs-event-store",
+      "@pbuda/nestjs-event-store-in-memory",
+      "@pbuda/nestjs-event-store-kurrentdb"
     ],
     "projectsRelationship": "fixed",
     "version": {
-      "preVersionCommand": "npx nx run-many -t build -p event-store-core in-memory",
+      "preVersionCommand": "npx nx run-many -t build -p @pbuda/nestjs-event-store @pbuda/nestjs-event-store-in-memory @pbuda/nestjs-event-store-kurrentdb",
       "conventionalCommits": true,
       "fallbackCurrentVersionResolver": "disk",
       "git": {

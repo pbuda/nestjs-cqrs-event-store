@@ -1,5 +1,5 @@
 {
-  "name": "@pbuda/event-store-kurrentdb",
+  "name": "@pbuda/nestjs-event-store-kurrentdb",
   "targets": {
     "integration-test": {
       "executor": "@nx/jest:jest",

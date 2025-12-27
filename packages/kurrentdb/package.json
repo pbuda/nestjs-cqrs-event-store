@@ -1,5 +1,5 @@
 {
-  "name": "@pbuda/event-store-kurrentdb",
+  "name": "@pbuda/nestjs-event-store-kurrentdb",
   "version": "0.2.0",
   "main": "./dist/index.js",
   "module": "./dist/index.js",
@@ -13,15 +13,12 @@
       "default": "./dist/index.js"
     }
   },
-  "nx": {
-    "name": "kurrentdb"
-  },
   "dependencies": {
     "tslib": "^2.3.0"
   },
   "peerDependencies": {
     "@kurrent/kurrentdb-client": "^1.1.0",
     "@nestjs/common": "^11.0.0",
-    "@pbuda/event-store-core": "0.2.0"
+    "@pbuda/nestjs-event-store": "0.2.0"
   }
 }

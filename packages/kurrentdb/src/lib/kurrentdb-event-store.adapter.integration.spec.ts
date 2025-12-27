@@ -4,7 +4,7 @@ import {
   EventMetadata,
   RecordedEventEnvelope,
   ResolvedEventEnvelope,
-} from '@pbuda/event-store-core';
+} from '@pbuda/nestjs-event-store';
 import { randomUUID } from 'crypto';
 
 /**

@@ -77,7 +77,7 @@ jobs:
         run: npm ci
 
       - name: Build dependencies
-        run: npx nx build event-store-core
+        run: npx nx build @pbuda/nestjs-event-store
 
       - name: Wait for KurrentDB
         run: |
@@ -86,4 +86,4 @@ jobs:
           echo "KurrentDB is ready"
 
       - name: Run Integration Tests
-        run: npx nx integration-test @pbuda/event-store-kurrentdb
+        run: npx nx integration-test @pbuda/nestjs-event-store-kurrentdb

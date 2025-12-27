@@ -1,5 +1,5 @@
 {
-  "name": "@pbuda/event-store-in-memory",
+  "name": "@pbuda/nestjs-event-store-in-memory",
   "version": "0.2.0",
   "private": true,
   "main": "./dist/index.js",
@@ -14,14 +14,11 @@
       "default": "./dist/index.js"
     }
   },
-  "nx": {
-    "name": "in-memory"
-  },
   "dependencies": {
     "tslib": "^2.3.0"
   },
   "peerDependencies": {
     "@nestjs/common": "^11.0.0",
-    "@pbuda/event-store-core": "0.2.0"
+    "@pbuda/nestjs-event-store": "0.2.0"
   }
 }

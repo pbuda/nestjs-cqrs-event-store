@@ -1,5 +1,5 @@
 import { AggregateRoot } from '@nestjs/cqrs';
-import { IAggregateIdentifiable } from '@pbuda/event-store-core';
+import { IAggregateIdentifiable } from '@pbuda/nestjs-event-store';
 import { TodoArchivedEvent, TodoCreatedEvent, TodoEditedEvent } from './events';
 
 export class TodoAggregate

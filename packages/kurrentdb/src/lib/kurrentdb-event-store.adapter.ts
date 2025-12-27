@@ -25,7 +25,7 @@ import {
   Subscription,
   SubscribeToStreamOptions,
   SubscribeToAllOptions,
-} from '@pbuda/event-store-core';
+} from '@pbuda/nestjs-event-store';
 
 /**
  * KurrentDB implementation of IEventStoreAdapter.

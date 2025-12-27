@@ -4,7 +4,7 @@ import {
   EVENT_STORE_ADAPTER,
   IEventStoreAdapter,
   RecordedEventEnvelope,
-} from '@pbuda/event-store-core';
+} from '@pbuda/nestjs-event-store';
 import { TodoAggregate } from './todo.aggregate';
 import {
   TodoCreatedEvent,

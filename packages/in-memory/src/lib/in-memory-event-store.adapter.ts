@@ -10,7 +10,7 @@ import {
   Subscription,
   SubscribeToStreamOptions,
   SubscribeToAllOptions,
-} from '@pbuda/event-store-core';
+} from '@pbuda/nestjs-event-store';
 
 /**
  * In-memory implementation of IEventStoreAdapter.

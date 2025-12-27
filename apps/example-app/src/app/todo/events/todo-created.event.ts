@@ -1,4 +1,4 @@
-import { IDomainEvent } from '@pbuda/event-store-core';
+import { IDomainEvent } from '@pbuda/nestjs-event-store';
 
 export class TodoCreatedEvent implements IDomainEvent {
   readonly eventType = 'TodoCreatedV1';
