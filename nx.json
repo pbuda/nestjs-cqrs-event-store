@@ -1,7 +1,11 @@
 {
   "$schema": "./node_modules/nx/schemas/nx-schema.json",
   "release": {
-    "projects": ["event-store-core", "in-memory"],
+    "projects": [
+      "event-store-core",
+      "in-memory",
+      "@pbuda/event-store-kurrentdb"
+    ],
     "projectsRelationship": "fixed",
     "version": {
       "preVersionCommand": "npx nx run-many -t build -p event-store-core in-memory",

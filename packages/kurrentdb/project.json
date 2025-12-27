@@ -1,0 +1,12 @@
+{
+  "name": "@pbuda/event-store-kurrentdb",
+  "targets": {
+    "integration-test": {
+      "executor": "@nx/jest:jest",
+      "options": {
+        "jestConfig": "packages/kurrentdb/jest.integration.config.cts",
+        "passWithNoTests": false
+      }
+    }
+  }
+}
