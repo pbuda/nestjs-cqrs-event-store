@@ -35,7 +35,8 @@ export interface EventStoreModuleAsyncOptions {
    * Factory function that returns the adapter instance.
    */
   useFactory: (
-    ...args: unknown[]
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ...args: any[]
   ) => IEventStoreAdapter | Promise<IEventStoreAdapter>;
 
   /**
