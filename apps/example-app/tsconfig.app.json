@@ -13,6 +13,9 @@
   "exclude": [],
   "references": [
     {
+      "path": "../../packages/kurrentdb/tsconfig.lib.json"
+    },
+    {
       "path": "../../packages/in-memory/tsconfig.lib.json"
     },
     {
