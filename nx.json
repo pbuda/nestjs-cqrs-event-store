@@ -28,6 +28,10 @@
         "commit": true,
         "commitMessage": "chore(release): v{version} changelog"
       }
+    },
+    "releaseTagPattern": "v{version}",
+    "publish": {
+      "registry": "https://registry.npmjs.org"
     }
   },
   "namedInputs": {
