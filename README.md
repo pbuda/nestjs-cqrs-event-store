@@ -1,109 +1,303 @@
-# NestjsCqrsEventStore
+# NestJS CQRS Event Store
 
-<a alt="Nx logo" href="https://nx.dev" target="_blank" rel="noreferrer"><img src="https://raw.githubusercontent.com/nrwl/nx/master/images/nx-logo.png" width="45"></a>
+[![npm version](https://img.shields.io/npm/v/@pbuda/nestjs-event-store.svg)](https://www.npmjs.com/package/@pbuda/nestjs-event-store)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-✨ Your new, shiny [Nx workspace](https://nx.dev) is ready ✨.
+Persistent event storage for [@nestjs/cqrs](https://github.com/nestjs/cqrs) - seamlessly integrate event sourcing into your NestJS applications with support for KurrentDB (EventStoreDB), in-memory storage, and more adapters planned for the future.
 
-[Learn more about this workspace setup and its capabilities](https://nx.dev/nx-api/js?utm_source=nx_project&amp;utm_medium=readme&amp;utm_campaign=nx_projects) or run `npx nx graph` to visually explore what was created. Now, let's get you up to speed!
+## Features
 
-## Generate a library
+- **Seamless NestJS integration** - Drop-in replacement for the standard CQRS EventBus
+- **Automatic event persistence** - Events are persisted before being dispatched to handlers
+- **Multiple storage backends** - KurrentDB, PostgreSQL, or in-memory adapters
+- **Optimistic concurrency control** - Built-in stream revision tracking
+- **Catch-up subscriptions** - Subscribe to streams and receive historical + live events
+- **Correlation tracking** - Automatic correlation IDs for event tracing
+- **Pluggable architecture** - Easy to implement custom adapters
 
-```sh
-npx nx g @nx/js:lib packages/pkg1 --publishable --importPath=@my-org/pkg1
+## Packages
+
+| Package | Description |
+|---------|-------------|
+| [`@pbuda/nestjs-event-store`](https://www.npmjs.com/package/@pbuda/nestjs-event-store) | Core module with interfaces and NestJS integration |
+| [`@pbuda/nestjs-event-store-kurrentdb`](https://www.npmjs.com/package/@pbuda/nestjs-event-store-kurrentdb) | KurrentDB (EventStoreDB) adapter |
+| [`@pbuda/nestjs-event-store-in-memory`](https://www.npmjs.com/package/@pbuda/nestjs-event-store-in-memory) | In-memory adapter for testing |
+
+## Installation
+
+```bash
+# Core package (required)
+npm install @pbuda/nestjs-event-store
+
+# KurrentDB adapter
+npm install @pbuda/nestjs-event-store-kurrentdb @kurrent/kurrentdb-client
+
+# OR In-memory adapter (for testing/development)
+npm install @pbuda/nestjs-event-store-in-memory
 ```
 
-## Run tasks
+## Quick Start
 
-To build the library use:
+### 1. Configure the module
 
-```sh
-npx nx build pkg1
+```typescript
+import { Module } from '@nestjs/common';
+import { EventStoreModule } from '@pbuda/nestjs-event-store';
+import { KurrentDbEventStoreAdapter } from '@pbuda/nestjs-event-store-kurrentdb';
+
+@Module({
+  imports: [
+    EventStoreModule.forRootAsync({
+      useFactory: () => {
+        return new KurrentDbEventStoreAdapter(
+          'kurrentdb://localhost:2113?tls=false'
+        );
+      },
+    }),
+  ],
+})
+export class AppModule {}
 ```
 
-To run any task with Nx use:
+### 2. Define domain events
 
-```sh
-npx nx <target> <project-name>
+```typescript
+import { IDomainEvent } from '@pbuda/nestjs-event-store';
+
+export class OrderCreated implements IDomainEvent {
+  readonly eventType = 'OrderCreated';
+
+  constructor(
+    public readonly orderId: string,
+    public readonly customerId: string,
+    public readonly items: OrderItem[],
+  ) {}
+}
 ```
 
-These targets are either [inferred automatically](https://nx.dev/concepts/inferred-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) or defined in the `project.json` or `package.json` files.
+### 3. Use in aggregates
 
-[More about running tasks in the docs &raquo;](https://nx.dev/features/run-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+```typescript
+import { AggregateRoot } from '@nestjs/cqrs';
+import { IAggregateIdentifiable } from '@pbuda/nestjs-event-store';
 
-## Versioning and releasing
+export class Order extends AggregateRoot implements IAggregateIdentifiable {
+  readonly aggregateType = 'Order';
 
-To version and release the library use
+  constructor(public readonly aggregateId: string) {
+    super();
+  }
 
+  create(customerId: string, items: OrderItem[]) {
+    // This event will be automatically persisted to stream "Order-{aggregateId}"
+    this.apply(new OrderCreated(this.aggregateId, customerId, items));
+  }
+}
 ```
-npx nx release
+
+### 4. Publish events
+
+Events are automatically persisted when published through the `EventPublisher`:
+
+```typescript
+import { CommandHandler, ICommandHandler, EventPublisher } from '@nestjs/cqrs';
+
+@CommandHandler(CreateOrderCommand)
+export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
+  constructor(private publisher: EventPublisher) {}
+
+  async execute(command: CreateOrderCommand) {
+    const order = new Order(command.orderId);
+    const orderWithPublisher = this.publisher.mergeObjectContext(order);
+
+    orderWithPublisher.create(command.customerId, command.items);
+    orderWithPublisher.commit(); // Events persisted to "Order-{orderId}" stream
+
+    return order;
+  }
+}
 ```
 
-Pass `--dry-run` to see what would happen without actually releasing the library.
+## Configuration
 
-[Learn more about Nx release &raquo;](https://nx.dev/features/manage-releases?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+### Environment-Based Adapter Selection
 
-## Keep TypeScript project references up to date
+Switch between adapters based on environment configuration:
 
-Nx automatically updates TypeScript [project references](https://www.typescriptlang.org/docs/handbook/project-references.html) in `tsconfig.json` files to ensure they remain accurate based on your project dependencies (`import` or `require` statements). This sync is automatically done when running tasks such as `build` or `typecheck`, which require updated references to function correctly.
+```typescript
+import { Module } from '@nestjs/common';
+import { ConfigModule, ConfigService } from '@nestjs/config';
+import { EventStoreModule, IEventStoreAdapter } from '@pbuda/nestjs-event-store';
+import { InMemoryEventStoreAdapter } from '@pbuda/nestjs-event-store-in-memory';
+import { KurrentDbEventStoreAdapter } from '@pbuda/nestjs-event-store-kurrentdb';
 
-To manually trigger the process to sync the project graph dependencies information to the TypeScript project references, run the following command:
+@Module({
+  imports: [
+    ConfigModule.forRoot({ isGlobal: true }),
+    EventStoreModule.forRootAsync({
+      inject: [ConfigService],
+      useFactory: (config: ConfigService): IEventStoreAdapter => {
+        const adapterType = config.get<string>('EVENT_STORE_ADAPTER', 'memory');
 
-```sh
+        if (adapterType === 'kurrentdb') {
+          const connectionString = config.get<string>(
+            'KURRENTDB_CONNECTION_STRING',
+            'kurrentdb://localhost:2113?tls=false'
+          );
+          return new KurrentDbEventStoreAdapter(connectionString);
+        }
+
+        return new InMemoryEventStoreAdapter();
+      },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+### Using In-Memory Adapter for Testing
+
+```typescript
+import { EventStoreModule } from '@pbuda/nestjs-event-store';
+import { InMemoryEventStoreAdapter } from '@pbuda/nestjs-event-store-in-memory';
+
+EventStoreModule.forRoot({
+  adapter: InMemoryEventStoreAdapter,
+});
+```
+
+## Reading Events
+
+Access the adapter directly to read events or create subscriptions:
+
+```typescript
+import { Inject, Injectable } from '@nestjs/common';
+import { EVENT_STORE_ADAPTER, IEventStoreAdapter } from '@pbuda/nestjs-event-store';
+
+@Injectable()
+export class OrderProjection {
+  constructor(
+    @Inject(EVENT_STORE_ADAPTER)
+    private readonly eventStore: IEventStoreAdapter,
+  ) {}
+
+  async rebuildFromStream(orderId: string) {
+    const events = this.eventStore.readStream(`Order-${orderId}`);
+    for await (const event of events) {
+      this.apply(event);
+    }
+  }
+
+  async subscribeToOrders() {
+    const subscription = this.eventStore.subscribeToAll({
+      filterByStreamName: ['Order-'],
+    });
+
+    for await (const event of subscription.events) {
+      this.apply(event.event);
+    }
+  }
+}
+```
+
+## Development
+
+### Prerequisites
+
+- Node.js 18+
+- Docker (for running KurrentDB)
+- npm
+
+### Setup
+
+```bash
+# Clone the repository
+git clone https://github.com/pbuda/nestjs-cqrs-event-store.git
+cd nestjs-cqrs-event-store
+
+# Install dependencies
+npm install
+```
+
+### Running KurrentDB
+
+Start the KurrentDB instance required for integration tests:
+
+```bash
+docker compose up -d
+```
+
+KurrentDB will be available at `http://localhost:2113` with:
+- Projections enabled
+- Insecure mode (no TLS)
+- AtomPub over HTTP enabled
+
+### Build
+
+```bash
+# Build a specific package
+npx nx build core
+npx nx build kurrentdb
+npx nx build in-memory
+
+# Build all packages
+npx nx run-many -t build
+```
+
+### Test
+
+```bash
+# Run tests for a package
+npx nx test core
+
+# Run a specific test file
+npx nx test core --testFile=src/lib/some.spec.ts
+
+# Run all tests
+npx nx run-many -t test
+```
+
+### Lint & Type Check
+
+```bash
+# Lint
+npx nx lint core
+
+# Type check
+npx nx typecheck core
+
+# Run all checks
+npx nx run-many -t lint,typecheck
+```
+
+### Sync TypeScript Project References
+
+```bash
 npx nx sync
 ```
 
-You can enforce that the TypeScript project references are always in the correct state when running in CI by adding a step to your CI job configuration that runs the following command:
+## Project Structure
 
-```sh
-npx nx sync:check
+```
+nestjs-cqrs-event-store/
+├── packages/
+│   ├── core/           # Core module, interfaces, and NestJS integration
+│   ├── kurrentdb/      # KurrentDB adapter implementation
+│   └── in-memory/      # In-memory adapter for testing
+├── docker-compose.yaml # KurrentDB for local development
+└── nx.json            # Nx workspace configuration
 ```
 
-[Learn more about nx sync](https://nx.dev/reference/nx-commands#sync)
+## Contributing
 
-## Set up CI!
+Contributions are welcome. Please open an issue first to discuss what you would like to change.
 
-### Step 1
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-To connect to Nx Cloud, run the following command:
+## License
 
-```sh
-npx nx connect
-```
-
-Connecting to Nx Cloud ensures a [fast and scalable CI](https://nx.dev/ci/intro/why-nx-cloud?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects) pipeline. It includes features such as:
-
-- [Remote caching](https://nx.dev/ci/features/remote-cache?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Task distribution across multiple machines](https://nx.dev/ci/features/distribute-task-execution?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Automated e2e test splitting](https://nx.dev/ci/features/split-e2e-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Task flakiness detection and rerunning](https://nx.dev/ci/features/flaky-tasks?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-### Step 2
-
-Use the following command to configure a CI workflow for your workspace:
-
-```sh
-npx nx g ci-workflow
-```
-
-[Learn more about Nx on CI](https://nx.dev/ci/intro/ci-with-nx#ready-get-started-with-your-provider?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Install Nx Console
-
-Nx Console is an editor extension that enriches your developer experience. It lets you run tasks, generate code, and improves code autocompletion in your IDE. It is available for VSCode and IntelliJ.
-
-[Install Nx Console &raquo;](https://nx.dev/getting-started/editor-setup?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-## Useful links
-
-Learn more:
-
-- [Learn more about this workspace setup](https://nx.dev/nx-api/js?utm_source=nx_project&amp;utm_medium=readme&amp;utm_campaign=nx_projects)
-- [Learn about Nx on CI](https://nx.dev/ci/intro/ci-with-nx?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [Releasing Packages with Nx release](https://nx.dev/features/manage-releases?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-- [What are Nx plugins?](https://nx.dev/concepts/nx-plugins?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
-
-And join the Nx community:
-- [Discord](https://go.nx.dev/community)
-- [Follow us on X](https://twitter.com/nxdevtools) or [LinkedIn](https://www.linkedin.com/company/nrwl)
-- [Our Youtube channel](https://www.youtube.com/@nxdevtools)
-- [Our blog](https://nx.dev/blog?utm_source=nx_project&utm_medium=readme&utm_campaign=nx_projects)
+MIT
