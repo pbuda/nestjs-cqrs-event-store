@@ -8,10 +8,10 @@ export class TodoAggregate
 {
   readonly aggregateType = 'Todo';
 
-  private title: string = '';
-  private description: string = '';
-  private archived: boolean = false;
-  private _version: bigint = -1n;
+  private title = '';
+  private description = '';
+  private archived = false;
+  private _version = -1n;
 
   constructor(public readonly aggregateId: string) {
     super();
