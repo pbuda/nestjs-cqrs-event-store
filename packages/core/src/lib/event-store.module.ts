@@ -6,7 +6,7 @@ import {
   Provider,
   Type,
 } from '@nestjs/common';
-import { CqrsModule, EventBus, EventPublisher } from '@nestjs/cqrs';
+import { CqrsModule } from '@nestjs/cqrs';
 import {
   EVENT_STORE_ADAPTER,
   IEventStoreAdapter,
@@ -86,19 +86,9 @@ export class EventStoreModule {
         EventEnvelopeFactory,
         PersistentEventBus,
         PersistentEventPublisher,
-        {
-          provide: EventBus,
-          useExisting: PersistentEventBus,
-        },
-        {
-          provide: EventPublisher,
-          useExisting: PersistentEventPublisher,
-        },
       ],
       exports: [
         CqrsModule,
-        EventBus,
-        EventPublisher,
         PersistentEventBus,
         PersistentEventPublisher,
         EventContext,
@@ -140,26 +130,16 @@ export class EventStoreModule {
     return {
       module: EventStoreModule,
       global: true,
-      imports: [...(options.imports ?? []), CqrsModule],
+      imports: [...(options.imports ?? []), CqrsModule.forRoot()],
       providers: [
         adapterProvider,
         EventContext,
         EventEnvelopeFactory,
         PersistentEventBus,
         PersistentEventPublisher,
-        {
-          provide: EventBus,
-          useExisting: PersistentEventBus,
-        },
-        {
-          provide: EventPublisher,
-          useExisting: PersistentEventPublisher,
-        },
       ],
       exports: [
         CqrsModule,
-        EventBus,
-        EventPublisher,
         PersistentEventBus,
         PersistentEventPublisher,
         EventContext,
