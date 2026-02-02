@@ -2,9 +2,9 @@ import { Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { EventPublisher } from '@nestjs/cqrs';
 import {
   EVENT_STORE_ADAPTER,
-  IEventStoreAdapter,
   RecordedEventEnvelope,
 } from '@pbuda/nestjs-event-store';
+import type { IEventStoreAdapter } from '@pbuda/nestjs-event-store';
 import { TodoAggregate } from './todo.aggregate';
 import {
   TodoCreatedEvent,
