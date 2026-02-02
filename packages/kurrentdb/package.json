@@ -1,6 +1,6 @@
 {
   "name": "@pbuda/nestjs-event-store-kurrentdb",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "publishConfig": {
     "access": "public"
   },
@@ -22,6 +22,6 @@
   "peerDependencies": {
     "@kurrent/kurrentdb-client": "^1.1.0",
     "@nestjs/common": "^11.0.0",
-    "@pbuda/nestjs-event-store": "0.3.1"
+    "@pbuda/nestjs-event-store": "0.3.2"
   }
 }
