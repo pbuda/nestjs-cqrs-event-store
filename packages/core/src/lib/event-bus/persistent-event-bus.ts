@@ -94,6 +94,8 @@ export class PersistentEventBus<
       return;
     }
 
+    this.logger.debug(`publishAllInternal called with ${events.length} events`);
+
     // Resolve dispatcher context (handle overloaded signature)
     const dispatcherContext: unknown = dispatcherOrAsyncContext;
 

@@ -79,7 +79,7 @@ export class EventStoreModule {
     return {
       module: EventStoreModule,
       global: true,
-      imports: [CqrsModule],
+      imports: [CqrsModule.forRoot()],
       providers: [
         adapterProvider,
         EventContext,
