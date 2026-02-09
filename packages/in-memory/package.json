@@ -1,6 +1,6 @@
 {
   "name": "@pbuda/nestjs-event-store-in-memory",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "publishConfig": {
     "access": "public"
   },
@@ -21,6 +21,6 @@
   },
   "peerDependencies": {
     "@nestjs/common": "^11.0.0",
-    "@pbuda/nestjs-event-store": "0.3.5"
+    "@pbuda/nestjs-event-store": "0.3.6"
   }
 }
