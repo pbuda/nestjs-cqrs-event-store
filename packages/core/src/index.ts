@@ -9,6 +9,7 @@ export * from './lib/types/event-metadata';
 
 // Adapters
 export * from './lib/adapters/event-store-adapter.interface';
+export * from './lib/adapters/logging-event-store-adapter';
 
 // Context
 export * from './lib/context/event-context';

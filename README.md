@@ -166,6 +166,82 @@ EventStoreModule.forRoot({
 });
 ```
 
+### Logging
+
+The `LoggingEventStoreAdapter` decorator adds configurable logging to any adapter. Wrap your adapter and choose a logging level:
+
+| Level | Behavior |
+|-------|----------|
+| `none` | No logging (default) |
+| `events` | Log event envelopes on append — shows what's being persisted |
+| `all` | Log all adapter method calls, event envelopes, results, and errors |
+
+```typescript
+import { EventStoreModule, LoggingEventStoreAdapter } from '@pbuda/nestjs-event-store';
+import { KurrentDbEventStoreAdapter } from '@pbuda/nestjs-event-store-kurrentdb';
+
+EventStoreModule.forRootAsync({
+  inject: [ConfigService],
+  useFactory: (config: ConfigService) => {
+    const adapter = new KurrentDbEventStoreAdapter(
+      config.get('KURRENTDB_CONNECTION_STRING', 'kurrentdb://localhost:2113?tls=false')
+    );
+
+    return new LoggingEventStoreAdapter(
+      adapter,
+      config.get('EVENT_STORE_LOG_LEVEL', 'none')
+    );
+  },
+});
+```
+
+At `events` level, each appended event logs its type, id, and correlation id:
+
+```
+[LoggingEventStoreAdapter]   → Order-123: OrderCreatedV1 [id=abc-123, correlationId=def-456]
+```
+
+At `all` level, method calls and results are also logged:
+
+```
+[LoggingEventStoreAdapter] appendToStream(Order-123, 2 events, expectedRevision=1)
+[LoggingEventStoreAdapter]   → Order-123: OrderCreatedV1 [id=abc-123, correlationId=def-456]
+[LoggingEventStoreAdapter]   → Order-123: OrderShippedV1 [id=ghi-789, correlationId=def-456]
+[LoggingEventStoreAdapter] appendToStream(Order-123) succeeded, nextExpectedRevision=3
+```
+
+Operational logs (method calls, results, plain event summaries) use `debug` level. Errors use `error` level. You can pass a custom `Logger` instance as the third constructor argument.
+
+#### Logging Event Payloads
+
+By default, log lines include only the event type, id, and correlation id. To include payload details, implement `ILoggableDomainEvent` on your domain event — this lets each event control what's safe to log:
+
+```typescript
+import { ILoggableDomainEvent } from '@pbuda/nestjs-event-store';
+
+export class OrderCreated implements ILoggableDomainEvent {
+  readonly eventType = 'OrderCreatedV1';
+
+  constructor(
+    public readonly orderId: string,
+    public readonly customerId: string,
+    private readonly creditCard: string, // sensitive — not logged
+  ) {}
+
+  toLogString(): string {
+    return `orderId=${this.orderId}, customerId=${this.customerId}`;
+  }
+}
+```
+
+Events implementing `ILoggableDomainEvent` are logged at `log` level (instead of `debug`) with their `toLogString()` output appended — making them visible as an audit trail while operational noise stays at `debug`:
+
+```
+[LoggingEventStoreAdapter]   → Order-123: OrderCreatedV1 [id=abc-123, correlationId=def-456] orderId=1, customerId=cust-789
+```
+
+Events that don't implement the interface continue to log the compact summary. This is opt-in per event type — no adapter configuration needed.
+
 ## Reading Events
 
 Access the adapter directly to read events or create subscriptions:
