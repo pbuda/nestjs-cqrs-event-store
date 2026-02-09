@@ -125,6 +125,10 @@ export interface IEventStoreAdapter {
   /**
    * Read events from a stream.
    *
+   * Yields an empty iterable if the stream does not exist.
+   * In event sourcing, "no events" and "stream doesn't exist" are
+   * semantically equivalent.
+   *
    * @param streamId - Stream identifier to read from
    * @param options - Read options (direction, starting position, limit)
    * @returns Async iterable of recorded events

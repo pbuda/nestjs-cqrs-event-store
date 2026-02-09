@@ -8,6 +8,7 @@ import {
   BACKWARDS,
   streamNameFilter,
   eventTypeFilter,
+  StreamNotFoundError,
   type ResolvedEvent,
   type AllStreamResolvedEvent,
   type Position,
@@ -91,11 +92,18 @@ export class KurrentDbEventStoreAdapter
       maxCount: options?.maxCount ? BigInt(options.maxCount) : undefined,
     });
 
-    for await (const resolved of events) {
-      const recorded = this.mapResolvedEventToRecorded(resolved);
-      if (recorded) {
-        yield recorded;
+    try {
+      for await (const resolved of events) {
+        const recorded = this.mapResolvedEventToRecorded(resolved);
+        if (recorded) {
+          yield recorded;
+        }
       }
+    } catch (error) {
+      if (error instanceof StreamNotFoundError) {
+        return;
+      }
+      throw error;
     }
   }
 

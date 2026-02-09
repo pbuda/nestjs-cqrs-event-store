@@ -163,6 +163,17 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       expect((readEvents[0].data as { index: number }).index).toBe(2);
     });
 
+    it('should return empty iterable for a nonexistent stream', async () => {
+      const streamId = uniqueStreamId();
+
+      const readEvents: RecordedEventEnvelope[] = [];
+      for await (const event of adapter.readStream(streamId)) {
+        readEvents.push(event);
+      }
+
+      expect(readEvents).toHaveLength(0);
+    });
+
     it('should read events backwards', async () => {
       const streamId = uniqueStreamId();
       const events = Array.from({ length: 5 }, (_, i) =>
