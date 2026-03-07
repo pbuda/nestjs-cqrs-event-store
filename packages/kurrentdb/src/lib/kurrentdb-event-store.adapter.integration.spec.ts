@@ -43,6 +43,17 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
 
   const uniqueStreamId = () => `test-stream-${randomUUID()}`;
 
+  describe('subscribeToAll — filter validation', () => {
+    it('should throw when both filterByEventType and filterByStreamName are provided', () => {
+      expect(() =>
+        adapter.subscribeToAll({
+          filterByEventType: ['Order'],
+          filterByStreamName: ['Order-'],
+        })
+      ).toThrow('filterByEventType');
+    });
+  });
+
   describe('appendToStream', () => {
     it('should append a single event to a new stream', async () => {
       const streamId = uniqueStreamId();

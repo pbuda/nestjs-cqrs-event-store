@@ -3,11 +3,68 @@ import { InMemoryEventStoreAdapter } from './in-memory-event-store.adapter';
 import type { EventEnvelope } from '@pbuda/nestjs-event-store';
 import { randomUUID } from 'crypto';
 
+const createOrderEvent = (): EventEnvelope => ({
+  id: randomUUID(),
+  type: 'OrderCreated',
+  data: { orderId: randomUUID() },
+  metadata: { correlationId: randomUUID() },
+});
+
 const createEvent = (): EventEnvelope => ({
   id: randomUUID(),
   type: 'TestEventV1',
   data: { value: 1 },
   metadata: { correlationId: randomUUID() },
+});
+
+describe('InMemoryEventStoreAdapter — subscribeToAll filter validation', () => {
+  let adapter: InMemoryEventStoreAdapter;
+
+  beforeEach(() => {
+    adapter = new InMemoryEventStoreAdapter();
+  });
+
+  it('throws when both filterByEventType and filterByStreamName are provided', () => {
+    const call = () =>
+      adapter.subscribeToAll({
+        filterByEventType: ['Order'],
+        filterByStreamName: ['Order-'],
+      });
+
+    expect(call).toThrow('filterByEventType');
+    expect(call).toThrow('filterByStreamName');
+  });
+
+  it('does not throw when only filterByEventType is provided', async () => {
+    await adapter.appendToStream('Order-1', [createOrderEvent()]);
+
+    const subscription = adapter.subscribeToAll({
+      filterByEventType: ['Order'],
+    });
+
+    expect(subscription).toBeDefined();
+    await subscription.unsubscribe();
+  });
+
+  it('does not throw when only filterByStreamName is provided', async () => {
+    await adapter.appendToStream('Order-1', [createOrderEvent()]);
+
+    const subscription = adapter.subscribeToAll({
+      filterByStreamName: ['Order-'],
+    });
+
+    expect(subscription).toBeDefined();
+    await subscription.unsubscribe();
+  });
+
+  it('does not throw when filterByEventType is provided and filterByStreamName is empty', () => {
+    expect(() =>
+      adapter.subscribeToAll({
+        filterByEventType: ['Order'],
+        filterByStreamName: [],
+      })
+    ).not.toThrow();
+  });
 });
 
 describe('ConcurrencyConflictError', () => {

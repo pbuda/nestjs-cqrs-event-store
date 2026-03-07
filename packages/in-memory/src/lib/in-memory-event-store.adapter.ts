@@ -176,6 +176,15 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
   }
 
   subscribeToAll(options?: SubscribeToAllOptions): Subscription {
+    if (
+      options?.filterByEventType && options.filterByEventType.length > 0 &&
+      options?.filterByStreamName && options.filterByStreamName.length > 0
+    ) {
+      throw new Error(
+        'subscribeToAll does not support filterByEventType and filterByStreamName simultaneously — use one or the other'
+      );
+    }
+
     const fromPosition = options?.fromPosition ?? 'start';
     const filterByEventType = options?.filterByEventType;
     const filterByStreamName = options?.filterByStreamName;
