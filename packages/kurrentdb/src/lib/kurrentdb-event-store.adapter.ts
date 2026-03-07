@@ -9,6 +9,7 @@ import {
   streamNameFilter,
   eventTypeFilter,
   StreamNotFoundError,
+  WrongExpectedVersionError,
   type ResolvedEvent,
   type AllStreamResolvedEvent,
   type Position,
@@ -26,6 +27,7 @@ import {
   Subscription,
   SubscribeToStreamOptions,
   SubscribeToAllOptions,
+  ConcurrencyConflictError,
 } from '@pbuda/nestjs-event-store';
 
 /**
@@ -70,13 +72,25 @@ export class KurrentDbEventStoreAdapter
       })
     );
 
-    const result = await this.client.appendToStream(streamId, kurrentEvents, {
-      streamState: expectedRevision,
-    });
-
-    return {
-      nextExpectedRevision: result.nextExpectedRevision,
-    };
+    try {
+      const result = await this.client.appendToStream(streamId, kurrentEvents, {
+        streamState: expectedRevision,
+      });
+      return { nextExpectedRevision: result.nextExpectedRevision };
+    } catch (error) {
+      if (error instanceof WrongExpectedVersionError) {
+        const expectedRevisionValue =
+          typeof error.expectedState === 'bigint' ? error.expectedState : -1n;
+        const actualRevisionValue =
+          typeof error.actualState === 'bigint' ? error.actualState : -1n;
+        throw new ConcurrencyConflictError(
+          streamId,
+          expectedRevisionValue,
+          actualRevisionValue,
+        );
+      }
+      throw error;
+    }
   }
 
   async *readStream(

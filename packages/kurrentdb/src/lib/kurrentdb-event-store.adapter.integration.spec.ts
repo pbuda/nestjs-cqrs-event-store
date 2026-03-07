@@ -4,6 +4,7 @@ import {
   EventMetadata,
   RecordedEventEnvelope,
   ResolvedEventEnvelope,
+  ConcurrencyConflictError,
 } from '@pbuda/nestjs-event-store';
 import { randomUUID } from 'crypto';
 
@@ -98,7 +99,7 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
           [createEvent('TestEventV1', { step: 2 })],
           5n // Wrong revision
         )
-      ).rejects.toThrow();
+      ).rejects.toThrow(ConcurrencyConflictError);
     });
   });
 

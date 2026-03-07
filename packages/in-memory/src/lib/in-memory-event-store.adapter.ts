@@ -10,6 +10,7 @@ import {
   Subscription,
   SubscribeToStreamOptions,
   SubscribeToAllOptions,
+  ConcurrencyConflictError,
 } from '@pbuda/nestjs-event-store';
 
 /**
@@ -35,10 +36,7 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
 
     // Optimistic concurrency check
     if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
-      throw new Error(
-        `Concurrency conflict on stream "${streamId}": ` +
-          `expected revision ${expectedRevision}, but stream is at ${currentRevision}`
-      );
+      throw new ConcurrencyConflictError(streamId, expectedRevision, currentRevision);
     }
 
     const recordedEvents: RecordedEventEnvelope[] = events.map(

@@ -11,6 +11,9 @@ export * from './lib/types/event-metadata';
 export * from './lib/adapters/event-store-adapter.interface';
 export * from './lib/adapters/logging-event-store-adapter';
 
+// Errors
+export * from './lib/errors/concurrency-conflict.error';
+
 // Context
 export * from './lib/context/event-context';
 

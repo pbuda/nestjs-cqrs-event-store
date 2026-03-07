@@ -114,7 +114,7 @@ export interface IEventStoreAdapter {
    * @param expectedRevision - Expected stream revision for optimistic concurrency.
    *                           Use `undefined` for any revision, or a specific bigint.
    * @returns Result containing the next expected revision
-   * @throws {ConcurrencyError} When expectedRevision doesn't match
+   * @throws {ConcurrencyConflictError} When expectedRevision doesn't match
    */
   appendToStream(
     streamId: string,
