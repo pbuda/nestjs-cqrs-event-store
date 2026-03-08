@@ -15,6 +15,11 @@ import {
 } from '@pbuda/nestjs-event-store';
 import type { EventMetadata } from '@pbuda/nestjs-event-store';
 
+// MongoDB 6 driver promotes BSON Long to JavaScript number by default.
+// useBigInt64: true makes the driver return Long values as native bigint,
+// while leaving other numeric types (Int32, Double) as JavaScript numbers.
+const BSON_OPTIONS = { useBigInt64: true } as const;
+
 @Injectable()
 export class MongoDbEventStoreAdapter
   implements IEventStoreAdapter, OnModuleDestroy
@@ -54,14 +59,14 @@ export class MongoDbEventStoreAdapter
     const recorded: RecordedEventEnvelope = {
       streamId: doc['streamId'] as string,
       id: doc['id'] as string,
-      revision: (doc['revision'] as Long).toBigInt(),
+      revision: doc['revision'] as bigint,
       type: doc['type'] as string,
       created: doc['created'] as Date,
       data: doc['data'],
       metadata,
       position: {
-        commit: (doc['globalPosition'] as Long).toBigInt(),
-        prepare: (doc['globalPosition'] as Long).toBigInt(),
+        commit: doc['globalPosition'] as bigint,
+        prepare: doc['globalPosition'] as bigint,
       },
     };
     return {
@@ -79,51 +84,57 @@ export class MongoDbEventStoreAdapter
     const session = this.client.startSession();
     let currentRevision = -1n;
     try {
-      await session.withTransaction(async () => {
-        const col = this.getCollection();
-        const countersCol = this.getCountersCollection();
+      session.startTransaction();
+      const col = this.getCollection();
+      const countersCol = this.getCountersCollection();
 
-        // Find current max revision for the stream
-        const lastDoc = await col.findOne(
-          { streamId },
-          { sort: { revision: -1 }, session }
-        );
-        currentRevision = lastDoc
-          ? (lastDoc['revision'] as Long).toBigInt()
-          : -1n;
+      // Find current max revision for the stream
+      const lastDoc = await col.findOne(
+        { streamId },
+        { sort: { revision: -1 }, session, ...BSON_OPTIONS }
+      );
+      currentRevision = lastDoc
+        ? lastDoc['revision'] as bigint
+        : -1n;
 
-        // Explicit concurrency check
-        if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
-          throw new ConcurrencyConflictError(streamId, expectedRevision, currentRevision);
-        }
+      // Explicit concurrency check
+      if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
+        await session.abortTransaction();
+        throw new ConcurrencyConflictError(streamId, expectedRevision, currentRevision);
+      }
 
-        // Atomically allocate global positions for the batch
-        const before = await countersCol.findOneAndUpdate(
-          { _id: 'globalPosition' } as Record<string, unknown>,
-          { $inc: { seq: Long.fromBigInt(BigInt(events.length)) } },
-          { upsert: true, returnDocument: 'before', session }
-        );
-        const startGlobal = (before?.['seq'] as Long | undefined)?.toBigInt() ?? 0n;
+      // Atomically allocate global positions for the batch
+      const before = await countersCol.findOneAndUpdate(
+        { _id: 'globalPosition' } as Record<string, unknown>,
+        { $inc: { seq: Long.fromBigInt(BigInt(events.length)) } },
+        { upsert: true, returnDocument: 'before', session, ...BSON_OPTIONS }
+      );
+      const startGlobal = (before?.['seq'] as bigint | undefined) ?? 0n;
 
-        // Build and insert documents
-        const docs = events.map((event, i) => ({
-          streamId,
-          revision: Long.fromBigInt(currentRevision + 1n + BigInt(i)),
-          globalPosition: Long.fromBigInt(startGlobal + BigInt(i)),
-          id: event.id,
-          type: event.type,
-          data: event.data,
-          metadata: event.metadata,
-          created: new Date(),
-        }));
+      // Build and insert documents
+      const docs = events.map((event, i) => ({
+        streamId,
+        revision: Long.fromBigInt(currentRevision + 1n + BigInt(i)),
+        globalPosition: Long.fromBigInt(startGlobal + BigInt(i)),
+        id: event.id,
+        type: event.type,
+        data: event.data,
+        metadata: event.metadata,
+        created: new Date(),
+      }));
 
+      try {
         await col.insertMany(docs, { session });
-      });
+        await session.commitTransaction();
+      } catch (insertError) {
+        await session.abortTransaction();
+        if (insertError instanceof MongoServerError && insertError.code === 11000) {
+          throw new ConcurrencyConflictError(streamId, expectedRevision ?? -1n, currentRevision);
+        }
+        throw insertError;
+      }
     } catch (error) {
       if (error instanceof ConcurrencyConflictError) throw error;
-      if (error instanceof MongoServerError && error.code === 11000) {
-        throw new ConcurrencyConflictError(streamId, expectedRevision ?? -1n, currentRevision);
-      }
       throw error;
     } finally {
       await session.endSession();
@@ -159,7 +170,7 @@ export class MongoDbEventStoreAdapter
     // 'end' + backwards: no revision filter (reads from last)
 
     const sortOrder = direction === 'forwards' ? 1 : -1;
-    let cursor = col.find(query).sort({ revision: sortOrder });
+    let cursor = col.find(query, BSON_OPTIONS).sort({ revision: sortOrder });
     if (maxCount !== undefined) {
       cursor = cursor.limit(maxCount);
     }
@@ -170,14 +181,14 @@ export class MongoDbEventStoreAdapter
         yield {
           streamId: doc['streamId'] as string,
           id: doc['id'] as string,
-          revision: (doc['revision'] as Long).toBigInt(),
+          revision: doc['revision'] as bigint,
           type: doc['type'] as string,
           created: doc['created'] as Date,
           data: doc['data'],
           metadata,
           position: {
-            commit: (doc['globalPosition'] as Long).toBigInt(),
-            prepare: (doc['globalPosition'] as Long).toBigInt(),
+            commit: doc['globalPosition'] as bigint,
+            prepare: doc['globalPosition'] as bigint,
           },
         };
       }
@@ -206,7 +217,7 @@ export class MongoDbEventStoreAdapter
           'fullDocument.streamId': streamId,
         },
       }];
-      const changeStream = col.watch(pipeline, { fullDocument: 'updateLookup' });
+      const changeStream = col.watch(pipeline, { fullDocument: 'updateLookup', ...BSON_OPTIONS });
       activeChangeStream = changeStream;
 
       let lastHistoricalRevision = -1n;
@@ -217,11 +228,11 @@ export class MongoDbEventStoreAdapter
         if (typeof fromRevision === 'bigint') {
           query['revision'] = { $gte: Long.fromBigInt(fromRevision) };
         }
-        const cursor = col.find(query).sort({ revision: 1 });
+        const cursor = col.find(query, BSON_OPTIONS).sort({ revision: 1 });
         try {
           for await (const doc of cursor) {
             if (cancelled) { await cursor.close(); return; }
-            lastHistoricalRevision = (doc['revision'] as Long).toBigInt();
+            lastHistoricalRevision = doc['revision'] as bigint;
             const metadata = validateEventMetadata(doc['metadata']);
             yield mapDoc(doc as Record<string, unknown>, metadata);
           }
@@ -237,7 +248,7 @@ export class MongoDbEventStoreAdapter
           if (change.operationType !== 'insert') continue;
           const doc = change.fullDocument as Record<string, unknown> | null;
           if (!doc) continue;
-          const rev = (doc['revision'] as Long).toBigInt();
+          const rev = doc['revision'] as bigint;
           if (rev <= lastHistoricalRevision) continue; // already yielded in history
           const metadata = validateEventMetadata(doc['metadata']);
           yield mapDoc(doc, metadata);
@@ -295,7 +306,7 @@ export class MongoDbEventStoreAdapter
       // Open change stream first
       const changeStream = col.watch(
         [{ $match: { operationType: 'insert' } }],
-        { fullDocument: 'updateLookup' }
+        { fullDocument: 'updateLookup', ...BSON_OPTIONS }
       );
       activeChangeStream = changeStream;
 
@@ -308,12 +319,12 @@ export class MongoDbEventStoreAdapter
           // fromPosition is an EventPosition object
           query['globalPosition'] = { $gt: Long.fromBigInt(fromPosition.commit) };
         }
-        const cursor = col.find(query).sort({ globalPosition: 1 });
+        const cursor = col.find(query, BSON_OPTIONS).sort({ globalPosition: 1 });
         try {
           for await (const doc of cursor) {
             if (cancelled) { await cursor.close(); return; }
             if (!matchesFilters(doc as Record<string, unknown>)) continue;
-            lastHistoricalGlobalPos = (doc['globalPosition'] as Long).toBigInt();
+            lastHistoricalGlobalPos = doc['globalPosition'] as bigint;
             const metadata = validateEventMetadata(doc['metadata']);
             yield mapDoc(doc as Record<string, unknown>, metadata);
           }
@@ -330,7 +341,7 @@ export class MongoDbEventStoreAdapter
           const doc = change.fullDocument as Record<string, unknown> | null;
           if (!doc) continue;
           if (!matchesFilters(doc)) continue;
-          const gp = (doc['globalPosition'] as Long).toBigInt();
+          const gp = doc['globalPosition'] as bigint;
           if (gp <= lastHistoricalGlobalPos) continue; // deduplicate
           const metadata = validateEventMetadata(doc['metadata']);
           yield mapDoc(doc, metadata);
