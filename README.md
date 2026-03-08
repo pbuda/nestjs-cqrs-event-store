@@ -9,7 +9,7 @@ Persistent event storage for [@nestjs/cqrs](https://github.com/nestjs/cqrs) - se
 
 - **Seamless NestJS integration** - Drop-in replacement for the standard CQRS EventBus
 - **Automatic event persistence** - Events are persisted before being dispatched to handlers
-- **Multiple storage backends** - KurrentDB, PostgreSQL, or in-memory adapters
+- **Multiple storage backends** - KurrentDB, MongoDB, or in-memory adapters
 - **Optimistic concurrency control** - Built-in stream revision tracking
 - **Catch-up subscriptions** - Subscribe to streams and receive historical + live events
 - **Correlation tracking** - Automatic correlation IDs for event tracing
@@ -21,6 +21,7 @@ Persistent event storage for [@nestjs/cqrs](https://github.com/nestjs/cqrs) - se
 |---------|-------------|
 | [`@pbuda/nestjs-event-store`](https://www.npmjs.com/package/@pbuda/nestjs-event-store) | Core module with interfaces and NestJS integration |
 | [`@pbuda/nestjs-event-store-kurrentdb`](https://www.npmjs.com/package/@pbuda/nestjs-event-store-kurrentdb) | KurrentDB (EventStoreDB) adapter |
+| [`@pbuda/nestjs-event-store-mongodb`](https://www.npmjs.com/package/@pbuda/nestjs-event-store-mongodb) | MongoDB adapter (requires replica set) |
 | [`@pbuda/nestjs-event-store-in-memory`](https://www.npmjs.com/package/@pbuda/nestjs-event-store-in-memory) | In-memory adapter for testing |
 
 ## Installation
@@ -31,6 +32,9 @@ npm install @pbuda/nestjs-event-store
 
 # KurrentDB adapter
 npm install @pbuda/nestjs-event-store-kurrentdb @kurrent/kurrentdb-client
+
+# OR MongoDB adapter
+npm install @pbuda/nestjs-event-store-mongodb mongodb
 
 # OR In-memory adapter (for testing/development)
 npm install @pbuda/nestjs-event-store-in-memory
@@ -122,7 +126,51 @@ export class CreateOrderHandler implements ICommandHandler<CreateOrderCommand> {
 
 ### Environment-Based Adapter Selection
 
-Switch between adapters based on environment configuration:
+Switch between adapters based on environment configuration. See the [MongoDB adapter](#mongodb-adapter) section below for the full three-adapter example including MongoDB.
+
+### MongoDB Adapter
+
+The MongoDB adapter stores events in a single collection and uses Change Streams for live subscriptions. It requires a **replica set** — Change Streams and multi-document transactions are not available on standalone MongoDB instances.
+
+#### Constructor
+
+```typescript
+new MongoDbEventStoreAdapter(
+  client: MongoClient,      // pre-built, connected MongoClient
+  dbName: string,           // database name
+  collectionName?: string   // collection name, default: 'events'
+)
+```
+
+The adapter creates two collections on startup:
+- `events` (or your custom name) — stores all event documents
+- `_event_counters` — maintains a monotonic global position counter
+
+Two indexes are created automatically:
+- `{ streamId, revision }` — unique, enforces optimistic concurrency
+- `{ globalPosition }` — used by `subscribeToAll` historical cursor
+
+#### Basic setup
+
+```typescript
+import { MongoClient } from 'mongodb';
+import { MongoDbEventStoreAdapter } from '@pbuda/nestjs-event-store-mongodb';
+
+EventStoreModule.forRootAsync({
+  useFactory: () => {
+    const client = new MongoClient('mongodb://localhost:27017/?replicaSet=rs0');
+    return new MongoDbEventStoreAdapter(client, 'event_store');
+  },
+});
+```
+
+#### Custom collection name
+
+```typescript
+new MongoDbEventStoreAdapter(client, 'event_store', 'domain_events')
+```
+
+#### Environment-based adapter selection
 
 ```typescript
 import { Module } from '@nestjs/common';
@@ -130,6 +178,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
 import { EventStoreModule, IEventStoreAdapter } from '@pbuda/nestjs-event-store';
 import { InMemoryEventStoreAdapter } from '@pbuda/nestjs-event-store-in-memory';
 import { KurrentDbEventStoreAdapter } from '@pbuda/nestjs-event-store-kurrentdb';
+import { MongoDbEventStoreAdapter } from '@pbuda/nestjs-event-store-mongodb';
+import { MongoClient } from 'mongodb';
 
 @Module({
   imports: [
@@ -140,11 +190,19 @@ import { KurrentDbEventStoreAdapter } from '@pbuda/nestjs-event-store-kurrentdb'
         const adapterType = config.get<string>('EVENT_STORE_ADAPTER', 'memory');
 
         if (adapterType === 'kurrentdb') {
-          const connectionString = config.get<string>(
-            'KURRENTDB_CONNECTION_STRING',
-            'kurrentdb://localhost:2113?tls=false'
+          return new KurrentDbEventStoreAdapter(
+            config.get('KURRENTDB_CONNECTION_STRING', 'kurrentdb://localhost:2113?tls=false')
           );
-          return new KurrentDbEventStoreAdapter(connectionString);
+        }
+
+        if (adapterType === 'mongodb') {
+          const client = new MongoClient(
+            config.get('MONGODB_CONNECTION_STRING', 'mongodb://localhost:27017/?replicaSet=rs0')
+          );
+          return new MongoDbEventStoreAdapter(
+            client,
+            config.get('MONGODB_DB_NAME', 'event_store')
+          );
         }
 
         return new InMemoryEventStoreAdapter();
@@ -154,6 +212,44 @@ import { KurrentDbEventStoreAdapter } from '@pbuda/nestjs-event-store-kurrentdb'
 })
 export class AppModule {}
 ```
+
+**Environment variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EVENT_STORE_ADAPTER` | `memory` | Adapter to use: `memory`, `kurrentdb`, `mongodb` |
+| `MONGODB_CONNECTION_STRING` | `mongodb://localhost:27017/?replicaSet=rs0` | MongoDB connection URI |
+| `MONGODB_DB_NAME` | `event_store` | Database name |
+
+#### Infrastructure requirements
+
+The MongoDB adapter requires a replica set. For local development with Docker:
+
+```yaml
+# docker-compose.yaml
+services:
+  mongodb:
+    image: mongo:7
+    ports:
+      - "27017:27017"
+    command: mongod --replSet rs0 --bind_ip_all
+    healthcheck:
+      test: mongosh --eval "rs.status()" --quiet
+      interval: 5s
+      retries: 10
+
+  mongodb-init:
+    image: mongo:7
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    command: >
+      mongosh --host mongodb:27017 --eval
+      "rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'localhost:27017' }] })"
+    restart: "no"
+```
+
+> **Note:** The replica set member hostname (`localhost:27017` above) must match what your application resolves. If your app runs inside Docker, use the service name (`mongodb:27017`) instead.
 
 ### Using In-Memory Adapter for Testing
 
