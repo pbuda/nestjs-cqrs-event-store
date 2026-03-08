@@ -4,6 +4,7 @@ import {
   IEventStoreAdapter,
   EventEnvelope,
   RecordedEventEnvelope,
+  ResolvedEventEnvelope,
   AppendResult,
   ReadStreamOptions,
   Subscription,
@@ -12,6 +13,7 @@ import {
   ConcurrencyConflictError,
   validateEventMetadata,
 } from '@pbuda/nestjs-event-store';
+import type { EventMetadata } from '@pbuda/nestjs-event-store';
 
 @Injectable()
 export class MongoDbEventStoreAdapter
@@ -43,6 +45,29 @@ export class MongoDbEventStoreAdapter
 
   private getCountersCollection() {
     return this.client.db(this.dbName).collection('_event_counters');
+  }
+
+  private mapDocToResolvedEnvelope(
+    doc: Record<string, unknown>,
+    metadata: EventMetadata
+  ): ResolvedEventEnvelope {
+    const recorded: RecordedEventEnvelope = {
+      streamId: doc['streamId'] as string,
+      id: doc['id'] as string,
+      revision: (doc['revision'] as Long).toBigInt(),
+      type: doc['type'] as string,
+      created: doc['created'] as Date,
+      data: doc['data'],
+      metadata,
+      position: {
+        commit: (doc['globalPosition'] as Long).toBigInt(),
+        prepare: (doc['globalPosition'] as Long).toBigInt(),
+      },
+    };
+    return {
+      event: recorded,
+      commitPosition: recorded.position?.commit,
+    };
   }
 
   async appendToStream(
@@ -162,10 +187,78 @@ export class MongoDbEventStoreAdapter
   }
 
   subscribeToStream(
-    _streamId: string,
-    _options?: SubscribeToStreamOptions
+    streamId: string,
+    options?: SubscribeToStreamOptions
   ): Subscription {
-    throw new Error('Not implemented');
+    const col = this.getCollection();
+    const fromRevision = options?.fromRevision ?? 'start';
+    let cancelled = false;
+    let activeChangeStream: import('mongodb').ChangeStream | null = null;
+
+    // Bind helper to preserve 'this' context inside async generator
+    const mapDoc = this.mapDocToResolvedEnvelope.bind(this);
+
+    const generateEvents = async function* (): AsyncIterable<ResolvedEventEnvelope> {
+      // 1. Open change stream first (buffers live events during historical drain)
+      const pipeline = [{
+        $match: {
+          operationType: 'insert',
+          'fullDocument.streamId': streamId,
+        },
+      }];
+      const changeStream = col.watch(pipeline, { fullDocument: 'updateLookup' });
+      activeChangeStream = changeStream;
+
+      let lastHistoricalRevision = -1n;
+
+      // 2. Yield historical events (skip entirely if fromRevision === 'end')
+      if (fromRevision !== 'end') {
+        const query: Record<string, unknown> = { streamId };
+        if (typeof fromRevision === 'bigint') {
+          query['revision'] = { $gte: Long.fromBigInt(fromRevision) };
+        }
+        const cursor = col.find(query).sort({ revision: 1 });
+        try {
+          for await (const doc of cursor) {
+            if (cancelled) { await cursor.close(); return; }
+            lastHistoricalRevision = (doc['revision'] as Long).toBigInt();
+            const metadata = validateEventMetadata(doc['metadata']);
+            yield mapDoc(doc as Record<string, unknown>, metadata);
+          }
+        } finally {
+          await cursor.close();
+        }
+      }
+
+      // 3. Yield live events from change stream, deduplicate already-yielded revisions
+      try {
+        for await (const change of changeStream) {
+          if (cancelled) break;
+          if (change.operationType !== 'insert') continue;
+          const doc = change.fullDocument as Record<string, unknown> | null;
+          if (!doc) continue;
+          const rev = (doc['revision'] as Long).toBigInt();
+          if (rev <= lastHistoricalRevision) continue; // already yielded in history
+          const metadata = validateEventMetadata(doc['metadata']);
+          yield mapDoc(doc, metadata);
+        }
+      } catch (err) {
+        if (!cancelled) throw err;
+        // swallow the close-triggered error when cancelled
+      } finally {
+        if (!changeStream.closed) await changeStream.close();
+      }
+    };
+
+    return {
+      events: generateEvents(),
+      unsubscribe: async () => {
+        cancelled = true;
+        if (activeChangeStream && !activeChangeStream.closed) {
+          await activeChangeStream.close();
+        }
+      },
+    };
   }
 
   subscribeToAll(_options?: SubscribeToAllOptions): Subscription {
