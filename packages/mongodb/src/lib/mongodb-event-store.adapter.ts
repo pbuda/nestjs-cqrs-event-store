@@ -10,6 +10,7 @@ import {
   SubscribeToStreamOptions,
   SubscribeToAllOptions,
   ConcurrencyConflictError,
+  validateEventMetadata,
 } from '@pbuda/nestjs-event-store';
 
 @Injectable()
@@ -105,12 +106,59 @@ export class MongoDbEventStoreAdapter
     return { nextExpectedRevision: currentRevision + BigInt(events.length) };
   }
 
-  // eslint-disable-next-line require-yield
   async *readStream(
-    _streamId: string,
-    _options?: ReadStreamOptions
+    streamId: string,
+    options?: ReadStreamOptions
   ): AsyncIterable<RecordedEventEnvelope> {
-    throw new Error('Not implemented');
+    await this.indexesReady;
+    const col = this.getCollection();
+    const direction = options?.direction ?? 'forwards';
+    const fromRevision = options?.fromRevision ?? 'start';
+    const maxCount = options?.maxCount;
+
+    // 'end' + forwards → nothing to read
+    if (fromRevision === 'end' && direction === 'forwards') {
+      return;
+    }
+
+    // Build query
+    const query: Record<string, unknown> = { streamId };
+    if (typeof fromRevision === 'bigint') {
+      if (direction === 'forwards') {
+        query['revision'] = { $gte: Long.fromBigInt(fromRevision) };
+      } else {
+        query['revision'] = { $lte: Long.fromBigInt(fromRevision) };
+      }
+    }
+    // 'start' + forwards: no revision filter (reads from 0)
+    // 'end' + backwards: no revision filter (reads from last)
+
+    const sortOrder = direction === 'forwards' ? 1 : -1;
+    let cursor = col.find(query).sort({ revision: sortOrder });
+    if (maxCount !== undefined) {
+      cursor = cursor.limit(maxCount);
+    }
+
+    try {
+      for await (const doc of cursor) {
+        const metadata = validateEventMetadata(doc['metadata']);
+        yield {
+          streamId: doc['streamId'] as string,
+          id: doc['id'] as string,
+          revision: (doc['revision'] as Long).toBigInt(),
+          type: doc['type'] as string,
+          created: doc['created'] as Date,
+          data: doc['data'],
+          metadata,
+          position: {
+            commit: (doc['globalPosition'] as Long).toBigInt(),
+            prepare: (doc['globalPosition'] as Long).toBigInt(),
+          },
+        };
+      }
+    } finally {
+      await cursor.close();
+    }
   }
 
   subscribeToStream(
