@@ -1,61 +1,76 @@
-import { KurrentDbEventStoreAdapter } from './kurrentdb-event-store.adapter';
-import {
+import { MongoDbEventStoreAdapter } from './mongodb-event-store.adapter';
+import { MongoClient } from 'mongodb';
+import type {
   EventEnvelope,
-  EventMetadata,
   RecordedEventEnvelope,
   ResolvedEventEnvelope,
-  ConcurrencyConflictError,
 } from '@pbuda/nestjs-event-store';
+import { ConcurrencyConflictError } from '@pbuda/nestjs-event-store';
 import { randomUUID } from 'crypto';
 
 /**
- * Integration tests for KurrentDbEventStoreAdapter.
+ * Integration tests for MongoDbEventStoreAdapter.
  *
- * Requires KurrentDB running on localhost:2113 (insecure mode).
- * Start with: docker compose up -d
+ * Requires a MongoDB replica set running on localhost:27017.
+ * Start with: docker compose up -d mongodb.db mongodb.init
+ * Wait ~10s after first start for replica set initialization.
  */
-describe('KurrentDbEventStoreAdapter Integration', () => {
-  let adapter: KurrentDbEventStoreAdapter;
 
-  beforeAll(() => {
-    adapter = new KurrentDbEventStoreAdapter(
-      'kurrentdb://localhost:2113?tls=false'
-    );
+const MONGO_URI = 'mongodb://localhost:27017/?replicaSet=rs0';
+const DB_NAME = 'integration-tests';
+
+describe('MongoDbEventStoreAdapter Integration', () => {
+  let client: MongoClient;
+  let adapter: MongoDbEventStoreAdapter;
+
+  // client is shared across all tests (expensive to reconnect)
+  beforeAll(async () => {
+    client = new MongoClient(MONGO_URI);
+    await client.connect();
   });
 
   afterAll(async () => {
-    await adapter.onModuleDestroy();
+    await client.close();
   });
 
-  const createEvent = (
-    type: string,
-    data: Record<string, unknown>
-  ): EventEnvelope => ({
+  // A fresh adapter per test is required because indexesReady resolves once and
+  // the beforeEach collection drop removes indexes. A new adapter instance
+  // re-triggers ensureIndexes() for each test.
+  beforeEach(async () => {
+    const db = client.db(DB_NAME);
+    await db.collection('events').drop().catch(() => { /* ignore if not exists */ });
+    await db.collection('_event_counters').drop().catch(() => { /* ignore */ });
+    adapter = new MongoDbEventStoreAdapter(client, DB_NAME, 'events');
+    // Await indexesReady by reading from a nonexistent stream (no-op but triggers await indexesReady).
+    // This prevents the indexesReady Promise from staying in-flight when afterAll closes the client.
+    const noop: RecordedEventEnvelope[] = [];
+    for await (const e of adapter.readStream('__warmup__')) { noop.push(e); }
+  });
+
+  afterEach(async () => {
+    // No-op: client.close() is handled in afterAll; adapter has no independent resources
+    // (the client it holds is the shared one from beforeAll).
+  });
+
+  const createEvent = (type: string, data: Record<string, unknown>): EventEnvelope => ({
     id: randomUUID(),
     type,
     data,
-    metadata: {
-      correlationId: randomUUID(),
-      causationId: randomUUID(),
-      actor: 'test-user',
-    },
+    metadata: { correlationId: randomUUID(), causationId: randomUUID(), actor: 'test-user' },
   });
 
   const uniqueStreamId = () => `test-stream-${randomUUID()}`;
 
   describe('subscribeToAll — filter validation', () => {
-    it('should throw when both filterByEventType and filterByStreamName are provided', () => {
+    it('throws when both filterByEventType and filterByStreamName are provided', () => {
       expect(() =>
-        adapter.subscribeToAll({
-          filterByEventType: ['Order'],
-          filterByStreamName: ['Order-'],
-        })
+        adapter.subscribeToAll({ filterByEventType: ['Order'], filterByStreamName: ['Order-'] })
       ).toThrow('filterByEventType');
     });
   });
 
   describe('appendToStream', () => {
-    it('should append a single event to a new stream', async () => {
+    it('appends single event; nextExpectedRevision = 0n', async () => {
       const streamId = uniqueStreamId();
       const event = createEvent('TestEventV1', { message: 'hello' });
 
@@ -64,7 +79,7 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       expect(result.nextExpectedRevision).toBe(0n);
     });
 
-    it('should append multiple events to a stream', async () => {
+    it('appends 3 events; nextExpectedRevision = 2n', async () => {
       const streamId = uniqueStreamId();
       const events = [
         createEvent('TestEventV1', { index: 1 }),
@@ -77,16 +92,14 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       expect(result.nextExpectedRevision).toBe(2n);
     });
 
-    it('should support optimistic concurrency with expectedRevision', async () => {
+    it('succeeds with correct expectedRevision (optimistic concurrency)', async () => {
       const streamId = uniqueStreamId();
 
-      // First append
       const result1 = await adapter.appendToStream(streamId, [
         createEvent('TestEventV1', { step: 1 }),
       ]);
       expect(result1.nextExpectedRevision).toBe(0n);
 
-      // Second append with correct expectedRevision
       const result2 = await adapter.appendToStream(
         streamId,
         [createEvent('TestEventV1', { step: 2 })],
@@ -95,15 +108,13 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       expect(result2.nextExpectedRevision).toBe(1n);
     });
 
-    it('should fail on concurrency conflict', async () => {
+    it('throws ConcurrencyConflictError with wrong expectedRevision', async () => {
       const streamId = uniqueStreamId();
 
-      // First append
       await adapter.appendToStream(streamId, [
         createEvent('TestEventV1', { step: 1 }),
       ]);
 
-      // Second append with wrong expectedRevision
       await expect(
         adapter.appendToStream(
           streamId,
@@ -115,7 +126,7 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
   });
 
   describe('readStream', () => {
-    it('should read events from a stream', async () => {
+    it('reads events in insertion order; revision 0-indexed', async () => {
       const streamId = uniqueStreamId();
       const events = [
         createEvent('TestEventV1', { index: 1 }),
@@ -132,15 +143,13 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
 
       expect(readEvents).toHaveLength(3);
       expect(readEvents[0].streamId).toBe(streamId);
-      expect(readEvents[0].type).toBe('TestEventV1');
-      expect(BigInt(readEvents[0].revision)).toBe(0n);
+      expect(readEvents[0].revision).toBe(0n);
       expect(readEvents[0].data).toEqual({ index: 1 });
-
-      expect(BigInt(readEvents[2].revision)).toBe(2n);
+      expect(readEvents[2].revision).toBe(2n);
       expect(readEvents[2].data).toEqual({ index: 3 });
     });
 
-    it('should read events with maxCount limit', async () => {
+    it('reads with maxCount: 3 from 10 events', async () => {
       const streamId = uniqueStreamId();
       const events = Array.from({ length: 10 }, (_, i) =>
         createEvent('TestEventV1', { index: i })
@@ -156,7 +165,7 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       expect(readEvents).toHaveLength(3);
     });
 
-    it('should read events from a specific revision', async () => {
+    it('reads from specific revision (fromRevision: 2n → events at revision >= 2)', async () => {
       const streamId = uniqueStreamId();
       const events = Array.from({ length: 5 }, (_, i) =>
         createEvent('TestEventV1', { index: i })
@@ -165,9 +174,7 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       await adapter.appendToStream(streamId, events);
 
       const readEvents: RecordedEventEnvelope[] = [];
-      for await (const event of adapter.readStream(streamId, {
-        fromRevision: 2n,
-      })) {
+      for await (const event of adapter.readStream(streamId, { fromRevision: 2n })) {
         readEvents.push(event);
       }
 
@@ -175,7 +182,7 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       expect((readEvents[0].data as { index: number }).index).toBe(2);
     });
 
-    it('should return empty iterable for a nonexistent stream', async () => {
+    it('returns empty iterable for nonexistent stream (no error)', async () => {
       const streamId = uniqueStreamId();
 
       const readEvents: RecordedEventEnvelope[] = [];
@@ -186,7 +193,7 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       expect(readEvents).toHaveLength(0);
     });
 
-    it('should read events backwards', async () => {
+    it('reads backwards (direction: backwards, fromRevision: end)', async () => {
       const streamId = uniqueStreamId();
       const events = Array.from({ length: 5 }, (_, i) =>
         createEvent('TestEventV1', { index: i })
@@ -209,7 +216,7 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
   });
 
   describe('subscribeToStream', () => {
-    it('should receive historical events', async () => {
+    it('receives historical events from start', async () => {
       const streamId = uniqueStreamId();
       const events = [
         createEvent('TestEventV1', { index: 1 }),
@@ -221,7 +228,6 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       const subscription = adapter.subscribeToStream(streamId);
       const receivedEvents: ResolvedEventEnvelope[] = [];
 
-      // Read just the historical events
       for await (const event of subscription.events) {
         receivedEvents.push(event);
         if (receivedEvents.length >= 2) {
@@ -235,10 +241,9 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       expect(receivedEvents[0].event?.data).toEqual({ index: 1 });
     });
 
-    it('should receive live events after historical', async () => {
+    it('receives live events appended after subscription start', async () => {
       const streamId = uniqueStreamId();
 
-      // Append initial event
       await adapter.appendToStream(streamId, [
         createEvent('TestEventV1', { index: 1 }),
       ]);
@@ -246,7 +251,6 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       const subscription = adapter.subscribeToStream(streamId);
       const receivedEvents: ResolvedEventEnvelope[] = [];
 
-      // Start collecting events in background
       const collectPromise = (async () => {
         for await (const event of subscription.events) {
           receivedEvents.push(event);
@@ -257,7 +261,7 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
         }
       })();
 
-      // Give subscription time to catch up, then append more events
+      // Give subscription time to set up and drain historical events
       await new Promise((r) => setTimeout(r, 100));
       await adapter.appendToStream(streamId, [
         createEvent('TestEventV1', { index: 2 }),
@@ -269,10 +273,9 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       expect(receivedEvents).toHaveLength(3);
     });
 
-    it('should subscribe from end for live-only events', async () => {
+    it('fromRevision: end skips historical, receives only live events', async () => {
       const streamId = uniqueStreamId();
 
-      // Append initial events (these should NOT be received)
       await adapter.appendToStream(streamId, [
         createEvent('TestEventV1', { index: 1 }),
         createEvent('TestEventV1', { index: 2 }),
@@ -293,10 +296,9 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
         }
       })();
 
-      // Give subscription time to set up
+      // Give subscription time to set up (no historical events to drain)
       await new Promise((r) => setTimeout(r, 100));
 
-      // Append new event (this SHOULD be received)
       await adapter.appendToStream(streamId, [
         createEvent('TestEventV1', { index: 3 }),
       ]);
@@ -309,19 +311,8 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
   });
 
   describe('subscribeToAll', () => {
-    it('should receive events from multiple streams with event type filter', async () => {
-      const stream1 = uniqueStreamId();
-      const stream2 = uniqueStreamId();
-
-      // Append events with different types
-      await adapter.appendToStream(stream1, [
-        createEvent('OrderCreatedV1', { orderId: '1' }),
-        createEvent('PaymentReceivedV1', { paymentId: '1' }),
-      ]);
-      await adapter.appendToStream(stream2, [
-        createEvent('OrderCreatedV1', { orderId: '2' }),
-        createEvent('UserRegisteredV1', { userId: '1' }),
-      ]);
+    it('delivers only events matching filterByEventType prefix', async () => {
+      const streamId = uniqueStreamId();
 
       const subscription = adapter.subscribeToAll({
         fromPosition: 'end',
@@ -332,35 +323,29 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       const collectPromise = (async () => {
         for await (const event of subscription.events) {
           receivedEvents.push(event);
-          if (receivedEvents.length >= 2) {
+          if (receivedEvents.length >= 1) {
             await subscription.unsubscribe();
             break;
           }
         }
       })();
 
-      // Give subscription time to set up
       await new Promise((r) => setTimeout(r, 100));
 
-      // Append more events
-      await adapter.appendToStream(uniqueStreamId(), [
-        createEvent('OrderCreatedV1', { orderId: '3' }),
-        createEvent('PaymentReceivedV1', { paymentId: '2' }),
-        createEvent('OrderShippedV1', { orderId: '3' }),
+      await adapter.appendToStream(streamId, [
+        createEvent('PaymentProcessed', { amount: 100 }),
+        createEvent('OrderPlaced', { orderId: 'x1' }),
       ]);
 
       await collectPromise;
 
-      // Should only receive Order* events
-      expect(receivedEvents).toHaveLength(2);
-      expect(
-        receivedEvents.every((e) => e.event?.type.startsWith('Order'))
-      ).toBe(true);
+      expect(receivedEvents).toHaveLength(1);
+      expect(receivedEvents[0].event?.type).toBe('OrderPlaced');
     });
 
-    it('should receive events with stream name filter', async () => {
-      const orderStream = `Order-${randomUUID()}`;
-      const userStream = `User-${randomUUID()}`;
+    it('delivers only events from streams matching filterByStreamName prefix', async () => {
+      const ordersStreamId = `Order-${randomUUID()}`;
+      const usersStreamId = `User-${randomUUID()}`;
 
       const subscription = adapter.subscribeToAll({
         fromPosition: 'end',
@@ -371,48 +356,41 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
       const collectPromise = (async () => {
         for await (const event of subscription.events) {
           receivedEvents.push(event);
-          if (receivedEvents.length >= 2) {
+          if (receivedEvents.length >= 1) {
             await subscription.unsubscribe();
             break;
           }
         }
       })();
 
-      // Give subscription time to set up
       await new Promise((r) => setTimeout(r, 100));
 
-      // Append events to different streams
-      await adapter.appendToStream(orderStream, [
-        createEvent('OrderCreatedV1', { orderId: '1' }),
-        createEvent('OrderCreatedV1', { orderId: '2' }),
+      await adapter.appendToStream(usersStreamId, [
+        createEvent('UserRegistered', { userId: 'u1' }),
       ]);
-      await adapter.appendToStream(userStream, [
-        createEvent('UserCreatedV1', { userId: '1' }),
+      await adapter.appendToStream(ordersStreamId, [
+        createEvent('OrderCreated', { orderId: 'o1' }),
       ]);
 
       await collectPromise;
 
-      // Should only receive events from Order-* streams
-      expect(receivedEvents).toHaveLength(2);
-      expect(
-        receivedEvents.every((e) => e.event?.streamId.startsWith('Order-'))
-      ).toBe(true);
+      expect(receivedEvents).toHaveLength(1);
+      expect(receivedEvents[0].event?.streamId).toBe(ordersStreamId);
     });
   });
 
   describe('metadata preservation', () => {
-    it('should preserve event metadata through round-trip', async () => {
+    it('preserves correlationId, causationId, and actor through append and read', async () => {
       const streamId = uniqueStreamId();
-      const metadata: EventMetadata = {
-        correlationId: randomUUID(),
-        causationId: randomUUID(),
-        actor: 'test-actor-123',
-      };
+      const correlationId = randomUUID();
+      const causationId = randomUUID();
+      const actor = 'integration-test-user';
+
       const event: EventEnvelope = {
         id: randomUUID(),
-        type: 'TestEventV1',
-        data: { message: 'test' },
-        metadata,
+        type: 'MetadataTestEvent',
+        data: { payload: 'test' },
+        metadata: { correlationId, causationId, actor },
       };
 
       await adapter.appendToStream(streamId, [event]);
@@ -422,9 +400,10 @@ describe('KurrentDbEventStoreAdapter Integration', () => {
         readEvents.push(e);
       }
 
-      expect(readEvents[0].metadata.correlationId).toBe(metadata.correlationId);
-      expect(readEvents[0].metadata.causationId).toBe(metadata.causationId);
-      expect(readEvents[0].metadata.actor).toBe(metadata.actor);
+      expect(readEvents).toHaveLength(1);
+      expect(readEvents[0].metadata.correlationId).toBe(correlationId);
+      expect(readEvents[0].metadata.causationId).toBe(causationId);
+      expect(readEvents[0].metadata.actor).toBe(actor);
     });
   });
 });

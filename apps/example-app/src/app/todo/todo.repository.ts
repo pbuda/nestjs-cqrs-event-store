@@ -1,7 +1,7 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { EventPublisher } from '@nestjs/cqrs';
 import {
   EVENT_STORE_ADAPTER,
+  PersistentEventPublisher,
   RecordedEventEnvelope,
 } from '@pbuda/nestjs-event-store';
 import type { IEventStoreAdapter } from '@pbuda/nestjs-event-store';
@@ -17,7 +17,7 @@ export class TodoRepository {
   constructor(
     @Inject(EVENT_STORE_ADAPTER)
     private readonly eventStore: IEventStoreAdapter,
-    private readonly publisher: EventPublisher
+    private readonly publisher: PersistentEventPublisher
   ) {}
 
   async findById(todoId: string): Promise<TodoAggregate> {
@@ -39,9 +39,12 @@ export class TodoRepository {
   }
 
   async save(aggregate: TodoAggregate): Promise<void> {
-    // Merge with publisher to connect to EventBus, then commit
     const mergedAggregate = this.publisher.mergeObjectContext(aggregate);
-    mergedAggregate.commit();
+    // commit() is fire-and-forget — bypass it to await persistence before returning
+    const events = mergedAggregate.getUncommittedEvents().slice();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await (mergedAggregate.publishAll as unknown as (e: typeof events) => Promise<void>)(events);
+    mergedAggregate.uncommit();
   }
 
   private deserializeEvent(

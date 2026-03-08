@@ -6,6 +6,8 @@ import {
 } from '@pbuda/nestjs-event-store';
 import { InMemoryEventStoreAdapter } from '@pbuda/nestjs-event-store-in-memory';
 import { KurrentDbEventStoreAdapter } from '@pbuda/nestjs-event-store-kurrentdb';
+import { MongoDbEventStoreAdapter } from '@pbuda/nestjs-event-store-mongodb';
+import { MongoClient } from 'mongodb';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TodoModule } from './todo/todo.module';
@@ -26,6 +28,16 @@ import { TodoModule } from './todo/todo.module';
             'kurrentdb://localhost:2113?tls=false',
           );
           return new KurrentDbEventStoreAdapter(connectionString);
+        }
+
+        if (adapterType === 'mongodb') {
+          const connectionString = config.get<string>(
+            'MONGODB_CONNECTION_STRING',
+            'mongodb://localhost:27017/?replicaSet=rs0&directConnection=true',
+          );
+          const dbName = config.get<string>('MONGODB_DB_NAME', 'event_store');
+          const client = new MongoClient(connectionString);
+          return new MongoDbEventStoreAdapter(client, dbName);
         }
 
         return new InMemoryEventStoreAdapter();

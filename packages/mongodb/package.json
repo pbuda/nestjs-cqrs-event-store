@@ -1,0 +1,23 @@
+{
+  "name": "@pbuda/nestjs-event-store-mongodb",
+  "version": "0.3.6",
+  "publishConfig": { "access": "public" },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "@nestjs-cqrs-event-store/source": "./src/index.ts",
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "dependencies": { "tslib": "^2.3.0" },
+  "peerDependencies": {
+    "@nestjs/common": "^11.0.0",
+    "@pbuda/nestjs-event-store": "0.3.6",
+    "mongodb": "^6.0.0"
+  }
+}

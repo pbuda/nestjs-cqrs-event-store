@@ -9,6 +9,7 @@ import {
   streamNameFilter,
   eventTypeFilter,
   StreamNotFoundError,
+  WrongExpectedVersionError,
   type ResolvedEvent,
   type AllStreamResolvedEvent,
   type Position,
@@ -26,6 +27,8 @@ import {
   Subscription,
   SubscribeToStreamOptions,
   SubscribeToAllOptions,
+  ConcurrencyConflictError,
+  validateEventMetadata,
 } from '@pbuda/nestjs-event-store';
 
 /**
@@ -70,13 +73,25 @@ export class KurrentDbEventStoreAdapter
       })
     );
 
-    const result = await this.client.appendToStream(streamId, kurrentEvents, {
-      streamState: expectedRevision,
-    });
-
-    return {
-      nextExpectedRevision: result.nextExpectedRevision,
-    };
+    try {
+      const result = await this.client.appendToStream(streamId, kurrentEvents, {
+        streamState: expectedRevision,
+      });
+      return { nextExpectedRevision: result.nextExpectedRevision };
+    } catch (error) {
+      if (error instanceof WrongExpectedVersionError) {
+        const expectedRevisionValue =
+          typeof error.expectedState === 'bigint' ? error.expectedState : -1n;
+        const actualRevisionValue =
+          typeof error.actualState === 'bigint' ? error.actualState : -1n;
+        throw new ConcurrencyConflictError(
+          streamId,
+          expectedRevisionValue,
+          actualRevisionValue,
+        );
+      }
+      throw error;
+    }
   }
 
   async *readStream(
@@ -121,6 +136,15 @@ export class KurrentDbEventStoreAdapter
   }
 
   subscribeToAll(options?: SubscribeToAllOptions): Subscription {
+    if (
+      options?.filterByEventType && options.filterByEventType.length > 0 &&
+      options?.filterByStreamName && options.filterByStreamName.length > 0
+    ) {
+      throw new Error(
+        'subscribeToAll does not support filterByEventType and filterByStreamName simultaneously — use one or the other'
+      );
+    }
+
     const fromPosition = this.mapFromPosition(options?.fromPosition);
     const filter = this.buildFilter(options);
 
@@ -198,11 +222,7 @@ export class KurrentDbEventStoreAdapter
       type: event.type,
       created: event.created,
       data: event.data,
-      metadata: event.metadata as {
-        correlationId: string;
-        causationId?: string;
-        actor?: string;
-      },
+      metadata: validateEventMetadata(event.metadata),
       position: event.position,
     };
   }
@@ -223,11 +243,7 @@ export class KurrentDbEventStoreAdapter
         type: event.type,
         created: event.created,
         data: event.data,
-        metadata: event.metadata as {
-          correlationId: string;
-          causationId?: string;
-          actor?: string;
-        },
+        metadata: validateEventMetadata(event.metadata),
         position: event.position,
       },
       link: resolved.link
@@ -238,11 +254,7 @@ export class KurrentDbEventStoreAdapter
             type: resolved.link.type,
             created: resolved.link.created,
             data: resolved.link.data,
-            metadata: resolved.link.metadata as {
-              correlationId: string;
-              causationId?: string;
-              actor?: string;
-            },
+            metadata: validateEventMetadata(resolved.link.metadata),
             position: resolved.link.position,
           }
         : undefined,
@@ -267,11 +279,7 @@ export class KurrentDbEventStoreAdapter
               type: event.type,
               created: event.created,
               data: event.data,
-              metadata: event.metadata as {
-                correlationId: string;
-                causationId?: string;
-                actor?: string;
-              },
+              metadata: validateEventMetadata(event.metadata),
               position: event.position,
             },
             commitPosition: event.position?.commit,

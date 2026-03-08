@@ -10,6 +10,8 @@ import {
   Subscription,
   SubscribeToStreamOptions,
   SubscribeToAllOptions,
+  ConcurrencyConflictError,
+  validateEventMetadata,
 } from '@pbuda/nestjs-event-store';
 
 /**
@@ -35,10 +37,7 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
 
     // Optimistic concurrency check
     if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
-      throw new Error(
-        `Concurrency conflict on stream "${streamId}": ` +
-          `expected revision ${expectedRevision}, but stream is at ${currentRevision}`
-      );
+      throw new ConcurrencyConflictError(streamId, expectedRevision, currentRevision);
     }
 
     const recordedEvents: RecordedEventEnvelope[] = events.map(
@@ -98,11 +97,13 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
     if (direction === 'forwards') {
       const endIndex = Math.min(startIndex + maxCount, stream.length);
       for (let i = startIndex; i < endIndex; i++) {
+        validateEventMetadata(stream[i].metadata);
         yield stream[i];
       }
     } else {
       const endIndex = Math.max(startIndex - maxCount + 1, 0);
       for (let i = startIndex; i >= endIndex; i--) {
+        validateEventMetadata(stream[i].metadata);
         yield stream[i];
       }
     }
@@ -134,6 +135,7 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
 
       // Yield historical events
       for (let i = startIndex; i < stream.length && !cancelled; i++) {
+        validateEventMetadata(stream[i].metadata);
         yield { event: stream[i], commitPosition: stream[i].position?.commit };
       }
 
@@ -156,6 +158,7 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
           while (!cancelled) {
             const event = eventQueue.shift();
             if (event) {
+              validateEventMetadata(event.metadata);
               yield { event, commitPosition: event.position?.commit };
             } else {
               await new Promise<void>((resolve) => {
@@ -178,6 +181,15 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
   }
 
   subscribeToAll(options?: SubscribeToAllOptions): Subscription {
+    if (
+      options?.filterByEventType && options.filterByEventType.length > 0 &&
+      options?.filterByStreamName && options.filterByStreamName.length > 0
+    ) {
+      throw new Error(
+        'subscribeToAll does not support filterByEventType and filterByStreamName simultaneously — use one or the other'
+      );
+    }
+
     const fromPosition = options?.fromPosition ?? 'start';
     const filterByEventType = options?.filterByEventType;
     const filterByStreamName = options?.filterByStreamName;
@@ -222,6 +234,7 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
       for (let i = startIndex; i < allEvents.length && !cancelled; i++) {
         const event = allEvents[i];
         if (matchesFilters(event)) {
+          validateEventMetadata(event.metadata);
           yield { event, commitPosition: event.position?.commit };
         }
       }
@@ -247,6 +260,7 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
           while (!cancelled) {
             const event = eventQueue.shift();
             if (event) {
+              validateEventMetadata(event.metadata);
               yield { event, commitPosition: event.position?.commit };
             } else {
               await new Promise<void>((resolve) => {
