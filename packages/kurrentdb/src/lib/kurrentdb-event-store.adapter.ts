@@ -28,6 +28,7 @@ import {
   SubscribeToStreamOptions,
   SubscribeToAllOptions,
   ConcurrencyConflictError,
+  validateEventMetadata,
 } from '@pbuda/nestjs-event-store';
 
 /**
@@ -221,11 +222,7 @@ export class KurrentDbEventStoreAdapter
       type: event.type,
       created: event.created,
       data: event.data,
-      metadata: event.metadata as {
-        correlationId: string;
-        causationId?: string;
-        actor?: string;
-      },
+      metadata: validateEventMetadata(event.metadata),
       position: event.position,
     };
   }
@@ -246,11 +243,7 @@ export class KurrentDbEventStoreAdapter
         type: event.type,
         created: event.created,
         data: event.data,
-        metadata: event.metadata as {
-          correlationId: string;
-          causationId?: string;
-          actor?: string;
-        },
+        metadata: validateEventMetadata(event.metadata),
         position: event.position,
       },
       link: resolved.link
@@ -261,11 +254,7 @@ export class KurrentDbEventStoreAdapter
             type: resolved.link.type,
             created: resolved.link.created,
             data: resolved.link.data,
-            metadata: resolved.link.metadata as {
-              correlationId: string;
-              causationId?: string;
-              actor?: string;
-            },
+            metadata: validateEventMetadata(resolved.link.metadata),
             position: resolved.link.position,
           }
         : undefined,
@@ -290,11 +279,7 @@ export class KurrentDbEventStoreAdapter
               type: event.type,
               created: event.created,
               data: event.data,
-              metadata: event.metadata as {
-                correlationId: string;
-                causationId?: string;
-                actor?: string;
-              },
+              metadata: validateEventMetadata(event.metadata),
               position: event.position,
             },
             commitPosition: event.position?.commit,

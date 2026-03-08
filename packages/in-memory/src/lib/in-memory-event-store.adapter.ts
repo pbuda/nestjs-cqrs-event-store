@@ -11,6 +11,7 @@ import {
   SubscribeToStreamOptions,
   SubscribeToAllOptions,
   ConcurrencyConflictError,
+  validateEventMetadata,
 } from '@pbuda/nestjs-event-store';
 
 /**
@@ -96,11 +97,13 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
     if (direction === 'forwards') {
       const endIndex = Math.min(startIndex + maxCount, stream.length);
       for (let i = startIndex; i < endIndex; i++) {
+        validateEventMetadata(stream[i].metadata);
         yield stream[i];
       }
     } else {
       const endIndex = Math.max(startIndex - maxCount + 1, 0);
       for (let i = startIndex; i >= endIndex; i--) {
+        validateEventMetadata(stream[i].metadata);
         yield stream[i];
       }
     }
@@ -132,6 +135,7 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
 
       // Yield historical events
       for (let i = startIndex; i < stream.length && !cancelled; i++) {
+        validateEventMetadata(stream[i].metadata);
         yield { event: stream[i], commitPosition: stream[i].position?.commit };
       }
 
@@ -154,6 +158,7 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
           while (!cancelled) {
             const event = eventQueue.shift();
             if (event) {
+              validateEventMetadata(event.metadata);
               yield { event, commitPosition: event.position?.commit };
             } else {
               await new Promise<void>((resolve) => {
@@ -229,6 +234,7 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
       for (let i = startIndex; i < allEvents.length && !cancelled; i++) {
         const event = allEvents[i];
         if (matchesFilters(event)) {
+          validateEventMetadata(event.metadata);
           yield { event, commitPosition: event.position?.commit };
         }
       }
@@ -254,6 +260,7 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
           while (!cancelled) {
             const event = eventQueue.shift();
             if (event) {
+              validateEventMetadata(event.metadata);
               yield { event, commitPosition: event.position?.commit };
             } else {
               await new Promise<void>((resolve) => {

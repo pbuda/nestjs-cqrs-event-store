@@ -1,6 +1,6 @@
 import { ConcurrencyConflictError } from '@pbuda/nestjs-event-store';
 import { InMemoryEventStoreAdapter } from './in-memory-event-store.adapter';
-import type { EventEnvelope } from '@pbuda/nestjs-event-store';
+import type { EventEnvelope, EventMetadata } from '@pbuda/nestjs-event-store';
 import { randomUUID } from 'crypto';
 
 const createOrderEvent = (): EventEnvelope => ({
@@ -122,5 +122,55 @@ describe('InMemoryEventStoreAdapter', () => {
       // nextExpectedRevision equals stream.length (2 events total)
       expect(result.nextExpectedRevision).toBe(2n);
     });
+  });
+});
+
+describe('InMemoryEventStoreAdapter — metadata validation on read', () => {
+  const badEvent = (): EventEnvelope => ({
+    id: randomUUID(),
+    type: 'BadEvent',
+    data: {},
+    metadata: {} as EventMetadata,
+  });
+
+  it('throws when reading an event with invalid metadata', async () => {
+    const adapter = new InMemoryEventStoreAdapter();
+    await adapter.appendToStream('bad-stream', [badEvent()]);
+
+    await expect(async () => {
+      for await (const _event of adapter.readStream('bad-stream')) {
+        // exhausting the generator
+      }
+    }).rejects.toThrow('correlationId');
+  });
+
+  it('throws when receiving an event with invalid metadata via subscribeToStream', async () => {
+    const adapter = new InMemoryEventStoreAdapter();
+    await adapter.appendToStream('bad-stream', [badEvent()]);
+
+    const subscription = adapter.subscribeToStream('bad-stream');
+
+    await expect(async () => {
+      for await (const _event of subscription.events) {
+        // exhausting the generator
+      }
+    }).rejects.toThrow('correlationId');
+
+    await subscription.unsubscribe();
+  });
+
+  it('throws when receiving an event with invalid metadata via subscribeToAll', async () => {
+    const adapter = new InMemoryEventStoreAdapter();
+    await adapter.appendToStream('bad-stream', [badEvent()]);
+
+    const subscription = adapter.subscribeToAll();
+
+    await expect(async () => {
+      for await (const _event of subscription.events) {
+        // exhausting the generator
+      }
+    }).rejects.toThrow('correlationId');
+
+    await subscription.unsubscribe();
   });
 });
