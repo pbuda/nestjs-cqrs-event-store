@@ -261,7 +261,95 @@ export class MongoDbEventStoreAdapter
     };
   }
 
-  subscribeToAll(_options?: SubscribeToAllOptions): Subscription {
-    throw new Error('Not implemented');
+  subscribeToAll(options?: SubscribeToAllOptions): Subscription {
+    if (
+      options?.filterByEventType && options.filterByEventType.length > 0 &&
+      options?.filterByStreamName && options.filterByStreamName.length > 0
+    ) {
+      throw new Error(
+        'subscribeToAll does not support filterByEventType and filterByStreamName ' +
+        'simultaneously — use one or the other'
+      );
+    }
+
+    const col = this.getCollection();
+    const fromPosition = options?.fromPosition ?? 'start';
+    const filterByEventType = options?.filterByEventType;
+    const filterByStreamName = options?.filterByStreamName;
+    let cancelled = false;
+    let activeChangeStream: import('mongodb').ChangeStream | null = null;
+
+    const mapDoc = this.mapDocToResolvedEnvelope.bind(this);
+
+    const matchesFilters = (doc: Record<string, unknown>): boolean => {
+      if (filterByEventType && filterByEventType.length > 0) {
+        if (!filterByEventType.some((p) => (doc['type'] as string).startsWith(p))) return false;
+      }
+      if (filterByStreamName && filterByStreamName.length > 0) {
+        if (!filterByStreamName.some((p) => (doc['streamId'] as string).startsWith(p))) return false;
+      }
+      return true;
+    };
+
+    const generateEvents = async function* (): AsyncIterable<ResolvedEventEnvelope> {
+      // Open change stream first
+      const changeStream = col.watch(
+        [{ $match: { operationType: 'insert' } }],
+        { fullDocument: 'updateLookup' }
+      );
+      activeChangeStream = changeStream;
+
+      let lastHistoricalGlobalPos = -1n;
+
+      // Historical phase (skip if fromPosition === 'end')
+      if (fromPosition !== 'end') {
+        const query: Record<string, unknown> = {};
+        if (fromPosition !== 'start') {
+          // fromPosition is an EventPosition object
+          query['globalPosition'] = { $gt: Long.fromBigInt(fromPosition.commit) };
+        }
+        const cursor = col.find(query).sort({ globalPosition: 1 });
+        try {
+          for await (const doc of cursor) {
+            if (cancelled) { await cursor.close(); return; }
+            if (!matchesFilters(doc as Record<string, unknown>)) continue;
+            lastHistoricalGlobalPos = (doc['globalPosition'] as Long).toBigInt();
+            const metadata = validateEventMetadata(doc['metadata']);
+            yield mapDoc(doc as Record<string, unknown>, metadata);
+          }
+        } finally {
+          await cursor.close();
+        }
+      }
+
+      // Live phase
+      try {
+        for await (const change of changeStream) {
+          if (cancelled) break;
+          if (change.operationType !== 'insert') continue;
+          const doc = change.fullDocument as Record<string, unknown> | null;
+          if (!doc) continue;
+          if (!matchesFilters(doc)) continue;
+          const gp = (doc['globalPosition'] as Long).toBigInt();
+          if (gp <= lastHistoricalGlobalPos) continue; // deduplicate
+          const metadata = validateEventMetadata(doc['metadata']);
+          yield mapDoc(doc, metadata);
+        }
+      } catch (err) {
+        if (!cancelled) throw err;
+      } finally {
+        if (!changeStream.closed) await changeStream.close();
+      }
+    };
+
+    return {
+      events: generateEvents(),
+      unsubscribe: async () => {
+        cancelled = true;
+        if (activeChangeStream && !activeChangeStream.closed) {
+          await activeChangeStream.close();
+        }
+      },
+    };
   }
 }
