@@ -4,11 +4,12 @@
     "projects": [
       "@pbuda/nestjs-event-store",
       "@pbuda/nestjs-event-store-in-memory",
-      "@pbuda/nestjs-event-store-kurrentdb"
+      "@pbuda/nestjs-event-store-kurrentdb",
+      "@pbuda/nestjs-event-store-mongodb"
     ],
     "projectsRelationship": "fixed",
     "version": {
-      "preVersionCommand": "npx nx run-many -t build -p @pbuda/nestjs-event-store @pbuda/nestjs-event-store-in-memory @pbuda/nestjs-event-store-kurrentdb",
+      "preVersionCommand": "npx nx run-many -t build -p @pbuda/nestjs-event-store @pbuda/nestjs-event-store-in-memory @pbuda/nestjs-event-store-kurrentdb @pbuda/nestjs-event-store-mongodb",
       "conventionalCommits": true,
       "fallbackCurrentVersionResolver": "disk",
       "git": {
