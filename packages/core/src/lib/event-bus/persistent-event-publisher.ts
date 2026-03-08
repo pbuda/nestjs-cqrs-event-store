@@ -25,10 +25,10 @@ export class PersistentEventPublisher<EventBase extends IEvent = IEvent> {
 
     return class extends metatype {
       override publish(event: EventBase): void {
-        eventBus.publish(event, this);
+        return eventBus.publish(event, this) as unknown as void;
       }
       override publishAll(events: EventBase[]): void {
-        eventBus.publishAll(events, this);
+        return eventBus.publishAll(events, this) as unknown as void;
       }
     } as T;
   }
@@ -42,11 +42,11 @@ export class PersistentEventPublisher<EventBase extends IEvent = IEvent> {
     const eventBus = this.eventBus;
 
     object.publish = (event: EventBase) => {
-      eventBus.publish(event, object);
+      return eventBus.publish(event, object) as unknown as void;
     };
 
     object.publishAll = (events: EventBase[]) => {
-      eventBus.publishAll(events, object);
+      return eventBus.publishAll(events, object) as unknown as void;
     };
 
     return object;
