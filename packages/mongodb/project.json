@@ -1,0 +1,12 @@
+{
+  "name": "@pbuda/nestjs-event-store-mongodb",
+  "targets": {
+    "integration-test": {
+      "executor": "@nx/jest:jest",
+      "options": {
+        "jestConfig": "packages/mongodb/jest.integration.config.cts",
+        "passWithNoTests": false
+      }
+    }
+  }
+}
