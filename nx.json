@@ -7,30 +7,27 @@
       "@pbuda/nestjs-event-store-kurrentdb",
       "@pbuda/nestjs-event-store-mongodb"
     ],
-    "projectsRelationship": "fixed",
+    "projectsRelationship": "independent",
     "version": {
-      "preVersionCommand": "npx nx run-many -t build -p @pbuda/nestjs-event-store @pbuda/nestjs-event-store-in-memory @pbuda/nestjs-event-store-kurrentdb @pbuda/nestjs-event-store-mongodb",
       "conventionalCommits": true,
       "fallbackCurrentVersionResolver": "disk",
       "git": {
         "commit": true,
         "tag": true,
-        "push": true,
-        "commitMessage": "Release v{version}"
+        "commitMessage": "release({projectName}): v{version}"
       }
     },
     "changelog": {
-      "projectChangelogs": false,
-      "workspaceChangelog": {
-        "file": "CHANGELOG.md",
+      "projectChangelogs": {
         "createRelease": "github"
       },
+      "workspaceChangelog": false,
       "git": {
         "commit": true,
-        "commitMessage": "chore(release): v{version} changelog"
+        "commitMessage": "chore(release): {projectName} v{version} changelog"
       }
     },
-    "releaseTagPattern": "v{version}",
+    "releaseTagPattern": "{projectName}@{version}",
     "publish": {
       "registry": "https://registry.npmjs.org"
     }
