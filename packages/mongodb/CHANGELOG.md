@@ -1,3 +1,14 @@
+## 0.5.1 (2026-03-09)
+
+### 🩹 Fixes
+
+- **mongodb:** narrow abortTransaction error catch to MongoTransactionError ([45d887a](https://github.com/pbuda/nestjs-cqrs-event-store/commit/45d887a))
+
+### ❤️ Thank You
+
+- Claude Sonnet 4.6
+- Piotr Buda @pbuda
+
 ## 0.5.0 (2026-03-09)
 
 ### 🚀 Features
