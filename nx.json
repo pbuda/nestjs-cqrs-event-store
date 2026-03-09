@@ -8,24 +8,18 @@
       "@pbuda/nestjs-event-store-mongodb"
     ],
     "projectsRelationship": "independent",
+    "git": {
+      "commit": true,
+      "tag": true,
+      "commitMessage": "release({projectName}): v{version}"
+    },
     "version": {
       "conventionalCommits": true,
-      "fallbackCurrentVersionResolver": "disk",
-      "git": {
-        "commit": true,
-        "tag": true,
-        "commitMessage": "release({projectName}): v{version}"
-      }
+      "fallbackCurrentVersionResolver": "disk"
     },
     "changelog": {
-      "projectChangelogs": {
-        "createRelease": "github"
-      },
-      "workspaceChangelog": false,
-      "git": {
-        "commit": true,
-        "commitMessage": "chore(release): {projectName} v{version} changelog"
-      }
+      "projectChangelogs": true,
+      "workspaceChangelog": false
     },
     "releaseTagPattern": "{projectName}@{version}",
     "publish": {
