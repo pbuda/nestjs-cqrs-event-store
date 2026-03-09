@@ -29,7 +29,7 @@ export class MongoDbEventStoreAdapter
   constructor(
     private readonly client: MongoClient,
     private readonly dbName: string,
-    private readonly collectionName = 'events'
+    private readonly prefix = 'app'
   ) {
     this.indexesReady = this.ensureIndexes();
   }
@@ -45,11 +45,11 @@ export class MongoDbEventStoreAdapter
   }
 
   private getCollection() {
-    return this.client.db(this.dbName).collection(this.collectionName);
+    return this.client.db(this.dbName).collection(`${this.prefix}_events`);
   }
 
   private getCountersCollection() {
-    return this.client.db(this.dbName).collection('_event_counters');
+    return this.client.db(this.dbName).collection(`${this.prefix}__event_counters`);
   }
 
   private mapDocToResolvedEnvelope(

@@ -38,9 +38,9 @@ describe('MongoDbEventStoreAdapter Integration', () => {
   // re-triggers ensureIndexes() for each test.
   beforeEach(async () => {
     const db = client.db(DB_NAME);
-    await db.collection('events').drop().catch(() => { /* ignore if not exists */ });
-    await db.collection('_event_counters').drop().catch(() => { /* ignore */ });
-    adapter = new MongoDbEventStoreAdapter(client, DB_NAME, 'events');
+    await db.collection('app_events').drop().catch(() => { /* ignore if not exists */ });
+    await db.collection('app__event_counters').drop().catch(() => { /* ignore */ });
+    adapter = new MongoDbEventStoreAdapter(client, DB_NAME);
     // Await indexesReady by reading from a nonexistent stream (no-op but triggers await indexesReady).
     // This prevents the indexesReady Promise from staying in-flight when afterAll closes the client.
     const noop: RecordedEventEnvelope[] = [];

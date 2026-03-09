@@ -136,15 +136,15 @@ The MongoDB adapter stores events in a single collection and uses Change Streams
 
 ```typescript
 new MongoDbEventStoreAdapter(
-  client: MongoClient,      // pre-built, connected MongoClient
-  dbName: string,           // database name
-  collectionName?: string   // collection name, default: 'events'
+  client: MongoClient,  // pre-built, connected MongoClient
+  dbName: string,       // database name
+  prefix?: string       // collection name prefix, default: 'app'
 )
 ```
 
 The adapter creates two collections on startup:
-- `events` (or your custom name) — stores all event documents
-- `_event_counters` — maintains a monotonic global position counter
+- `{prefix}_events` — stores all event documents (default: `app_events`)
+- `{prefix}__event_counters` — maintains a monotonic global position counter (default: `app__event_counters`)
 
 Two indexes are created automatically:
 - `{ streamId, revision }` — unique, enforces optimistic concurrency
@@ -164,10 +164,11 @@ EventStoreModule.forRootAsync({
 });
 ```
 
-#### Custom collection name
+#### Custom prefix
 
 ```typescript
-new MongoDbEventStoreAdapter(client, 'event_store', 'domain_events')
+new MongoDbEventStoreAdapter(client, 'event_store', 'myapp')
+// Creates: myapp_events, myapp__event_counters
 ```
 
 #### Environment-based adapter selection
