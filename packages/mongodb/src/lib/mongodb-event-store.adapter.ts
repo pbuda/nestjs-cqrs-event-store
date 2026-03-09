@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import { Long, MongoClient, MongoServerError } from 'mongodb';
+import { Long, MongoClient, MongoServerError, MongoTransactionError } from 'mongodb';
 import {
   IEventStoreAdapter,
   EventEnvelope,
@@ -123,15 +123,32 @@ export class MongoDbEventStoreAdapter
         created: new Date(),
       }));
 
+      let committed = false;
       try {
         await col.insertMany(docs, { session });
         await session.commitTransaction();
+        committed = true;
       } catch (insertError) {
-        await session.abortTransaction();
-        if (insertError instanceof MongoServerError && insertError.code === 11000) {
-          throw new ConcurrencyConflictError(streamId, expectedRevision ?? -1n, currentRevision);
+        if (!committed) {
+          try {
+            await session.abortTransaction();
+          } catch (abortError) {
+            if (abortError instanceof MongoTransactionError) {
+              // abortTransaction rejected because the transaction was already committed
+              // on the server despite commitTransaction() throwing a transient driver error.
+              committed = true;
+            } else {
+              throw abortError;
+            }
+          }
         }
-        throw insertError;
+        if (!committed) {
+          if (insertError instanceof MongoServerError && insertError.code === 11000) {
+            throw new ConcurrencyConflictError(streamId, expectedRevision ?? -1n, currentRevision);
+          }
+          throw insertError;
+        }
+        // committed = true: data is written — fall through to return AppendResult
       }
     } catch (error) {
       if (error instanceof ConcurrencyConflictError) throw error;
