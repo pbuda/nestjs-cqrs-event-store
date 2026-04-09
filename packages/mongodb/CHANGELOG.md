@@ -1,3 +1,9 @@
+## 0.5.2 (2026-04-09)
+
+### 🧱 Updated Dependencies
+
+- Updated @pbuda/nestjs-event-store to 0.4.1
+
 ## 0.5.1 (2026-03-09)
 
 ### 🩹 Fixes
