@@ -125,7 +125,7 @@ export class LoggingEventStoreAdapter implements IEventStoreAdapter {
     events: EventEnvelope[]
   ): void {
     for (const event of events) {
-      const summary = `  → ${streamId}: ${event.type} [id=${event.id}, correlationId=${event.metadata.correlationId}]`;
+      const summary = `  → ${event.type}(${streamId})`;
 
       if (isLoggableDomainEvent(event.data)) {
         this.logger.log(`${summary} ${event.data.toLogString()}`);

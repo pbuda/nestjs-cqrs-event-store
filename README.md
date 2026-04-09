@@ -292,18 +292,18 @@ EventStoreModule.forRootAsync({
 });
 ```
 
-At `events` level, each appended event logs its type, id, and correlation id:
+At `events` level, each appended event logs its type and stream:
 
 ```
-[LoggingEventStoreAdapter]   → Order-123: OrderCreatedV1 [id=abc-123, correlationId=def-456]
+[LoggingEventStoreAdapter]   → OrderCreatedV1(Order-123)
 ```
 
 At `all` level, method calls and results are also logged:
 
 ```
 [LoggingEventStoreAdapter] appendToStream(Order-123, 2 events, expectedRevision=1)
-[LoggingEventStoreAdapter]   → Order-123: OrderCreatedV1 [id=abc-123, correlationId=def-456]
-[LoggingEventStoreAdapter]   → Order-123: OrderShippedV1 [id=ghi-789, correlationId=def-456]
+[LoggingEventStoreAdapter]   → OrderCreatedV1(Order-123)
+[LoggingEventStoreAdapter]   → OrderShippedV1(Order-123)
 [LoggingEventStoreAdapter] appendToStream(Order-123) succeeded, nextExpectedRevision=3
 ```
 
@@ -311,7 +311,7 @@ Operational logs (method calls, results, plain event summaries) use `debug` leve
 
 #### Logging Event Payloads
 
-By default, log lines include only the event type, id, and correlation id. To include payload details, implement `ILoggableDomainEvent` on your domain event — this lets each event control what's safe to log:
+By default, log lines include only the event type and stream id. To include payload details, implement `ILoggableDomainEvent` on your domain event — this lets each event control what's safe to log:
 
 ```typescript
 import { ILoggableDomainEvent } from '@pbuda/nestjs-event-store';
@@ -334,7 +334,7 @@ export class OrderCreated implements ILoggableDomainEvent {
 Events implementing `ILoggableDomainEvent` are logged at `log` level (instead of `debug`) with their `toLogString()` output appended — making them visible as an audit trail while operational noise stays at `debug`:
 
 ```
-[LoggingEventStoreAdapter]   → Order-123: OrderCreatedV1 [id=abc-123, correlationId=def-456] orderId=1, customerId=cust-789
+[LoggingEventStoreAdapter]   → OrderCreatedV1(Order-123) orderId=1, customerId=cust-789
 ```
 
 Events that don't implement the interface continue to log the compact summary. This is opt-in per event type — no adapter configuration needed.

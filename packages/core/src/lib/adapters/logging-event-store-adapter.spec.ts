@@ -112,14 +112,21 @@ describe('LoggingEventStoreAdapter', () => {
       await decorator.appendToStream('stream-1', [event]);
 
       expect(mockLogger.debug).toHaveBeenCalledWith(
-        expect.stringContaining('OrderCreatedV1')
+        expect.stringContaining('OrderCreatedV1(stream-1)')
       );
-      expect(mockLogger.debug).toHaveBeenCalledWith(
-        expect.stringContaining(event.id)
-      );
-      expect(mockLogger.debug).toHaveBeenCalledWith(
-        expect.stringContaining(event.metadata.correlationId)
-      );
+    });
+
+    it('does not include event id or correlationId in log output', async () => {
+      const decorator = createDecorator('events');
+      const event = createEvent('OrderCreatedV1');
+
+      await decorator.appendToStream('stream-1', [event]);
+
+      const loggedMessage = mockLogger.debug.mock.calls
+        .map(([msg]) => msg)
+        .find((msg: string) => msg.includes('OrderCreatedV1'));
+      expect(loggedMessage).not.toContain(event.id);
+      expect(loggedMessage).not.toContain(event.metadata.correlationId);
     });
 
     it('does not log method call at events level', async () => {
