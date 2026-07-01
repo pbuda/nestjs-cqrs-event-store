@@ -174,3 +174,46 @@ describe('InMemoryEventStoreAdapter — metadata validation on read', () => {
     await subscription.unsubscribe();
   });
 });
+
+describe('InMemoryEventStoreAdapter — unsubscribe while awaiting live events', () => {
+  // Lets the generator drain its (empty) history and park on the internal
+  // wait promise before we call unsubscribe().
+  const flushMicrotasks = () => new Promise((resolve) => setImmediate(resolve));
+
+  it('terminates the subscribeToAll generator when unsubscribed while parked', async () => {
+    const adapter = new InMemoryEventStoreAdapter();
+    const subscription = adapter.subscribeToAll();
+
+    const received: unknown[] = [];
+    const consumer = (async () => {
+      for await (const resolved of subscription.events) {
+        received.push(resolved);
+      }
+    })();
+
+    await flushMicrotasks();
+    await subscription.unsubscribe();
+
+    // Would hang forever before the fix; the consumer loop must complete.
+    await consumer;
+    expect(received).toHaveLength(0);
+  });
+
+  it('terminates the subscribeToStream generator when unsubscribed while parked', async () => {
+    const adapter = new InMemoryEventStoreAdapter();
+    const subscription = adapter.subscribeToStream('some-stream');
+
+    const received: unknown[] = [];
+    const consumer = (async () => {
+      for await (const resolved of subscription.events) {
+        received.push(resolved);
+      }
+    })();
+
+    await flushMicrotasks();
+    await subscription.unsubscribe();
+
+    await consumer;
+    expect(received).toHaveLength(0);
+  });
+});

@@ -115,6 +115,9 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
   ): Subscription {
     const fromRevision = options?.fromRevision ?? 'start';
     let cancelled = false;
+    // Wakes the generator when it is parked waiting for live events, so that
+    // both new events and unsubscribe() can resume it.
+    let wakeUp: (() => void) | null = null;
 
     // Capture references to avoid 'this' aliasing
     const streams = this.streams;
@@ -142,13 +145,12 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
       // Wait for live events
       if (!cancelled) {
         const eventQueue: RecordedEventEnvelope[] = [];
-        let resolveWait: (() => void) | null = null;
 
         const handler = (event: RecordedEventEnvelope) => {
           eventQueue.push(event);
-          if (resolveWait) {
-            resolveWait();
-            resolveWait = null;
+          if (wakeUp) {
+            wakeUp();
+            wakeUp = null;
           }
         };
 
@@ -162,7 +164,7 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
               yield { event, commitPosition: event.position?.commit };
             } else {
               await new Promise<void>((resolve) => {
-                resolveWait = resolve;
+                wakeUp = resolve;
               });
             }
           }
@@ -176,6 +178,10 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
       events: generateEvents(),
       unsubscribe: async () => {
         cancelled = true;
+        if (wakeUp) {
+          wakeUp();
+          wakeUp = null;
+        }
       },
     };
   }
@@ -194,6 +200,9 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
     const filterByEventType = options?.filterByEventType;
     const filterByStreamName = options?.filterByStreamName;
     let cancelled = false;
+    // Wakes the generator when it is parked waiting for live events, so that
+    // both new events and unsubscribe() can resume it.
+    let wakeUp: (() => void) | null = null;
 
     // Capture references to avoid 'this' aliasing
     const allEvents = this.allEvents;
@@ -242,14 +251,13 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
       // Wait for live events
       if (!cancelled) {
         const eventQueue: RecordedEventEnvelope[] = [];
-        let resolveWait: (() => void) | null = null;
 
         const handler = (event: RecordedEventEnvelope) => {
           if (matchesFilters(event)) {
             eventQueue.push(event);
-            if (resolveWait) {
-              resolveWait();
-              resolveWait = null;
+            if (wakeUp) {
+              wakeUp();
+              wakeUp = null;
             }
           }
         };
@@ -264,7 +272,7 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
               yield { event, commitPosition: event.position?.commit };
             } else {
               await new Promise<void>((resolve) => {
-                resolveWait = resolve;
+                wakeUp = resolve;
               });
             }
           }
@@ -278,6 +286,10 @@ export class InMemoryEventStoreAdapter implements IEventStoreAdapter {
       events: generateEvents(),
       unsubscribe: async () => {
         cancelled = true;
+        if (wakeUp) {
+          wakeUp();
+          wakeUp = null;
+        }
       },
     };
   }
