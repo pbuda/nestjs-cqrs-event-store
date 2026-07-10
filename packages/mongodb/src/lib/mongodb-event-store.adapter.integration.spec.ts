@@ -123,6 +123,63 @@ describe('MongoDbEventStoreAdapter Integration', () => {
         )
       ).rejects.toThrow(ConcurrencyConflictError);
     });
+
+    it('survives concurrent appends to different streams without WriteConflict', async () => {
+      // Each append increments the shared globalPosition counter document.
+      // Concurrent transactions contend on it, producing MongoDB WriteConflict
+      // (code 112, a TransientTransactionError) which must be retried, not thrown.
+      const concurrency = 20;
+      const streamIds = Array.from({ length: concurrency }, () => uniqueStreamId());
+
+      const results = await Promise.all(
+        streamIds.map((streamId) =>
+          adapter.appendToStream(streamId, [
+            createEvent('TestEventV1', { message: 'concurrent' }),
+          ])
+        )
+      );
+
+      expect(results).toHaveLength(concurrency);
+      results.forEach((r) => expect(r.nextExpectedRevision).toBe(0n));
+
+      // Global positions must be unique across all appends (no lost increments).
+      const positions = new Set<bigint>();
+      for (const streamId of streamIds) {
+        for await (const e of adapter.readStream(streamId)) {
+          positions.add(e.position!.commit);
+        }
+      }
+      expect(positions.size).toBe(concurrency);
+    });
+
+    it('survives concurrent appends to the same stream', async () => {
+      // Concurrent appends to one stream contend on both the globalPosition
+      // counter and the unique { streamId, revision } index. Exactly one should
+      // win each revision; the rest must either retry to a fresh revision or
+      // surface a ConcurrencyConflictError — never a raw WriteConflict.
+      const streamId = uniqueStreamId();
+      const concurrency = 10;
+
+      const settled = await Promise.allSettled(
+        Array.from({ length: concurrency }, (_, i) =>
+          adapter.appendToStream(streamId, [
+            createEvent('TestEventV1', { index: i }),
+          ], -1n)
+        )
+      );
+
+      // With expectedRevision -1n, only one append can legitimately land at
+      // revision 0; the others must fail with ConcurrencyConflictError, not a
+      // raw MongoServerError WriteConflict.
+      const rejections = settled.filter((s) => s.status === 'rejected');
+      rejections.forEach((r) => {
+        const reason = (r as PromiseRejectedResult).reason;
+        expect(reason).toBeInstanceOf(ConcurrencyConflictError);
+      });
+
+      const fulfilled = settled.filter((s) => s.status === 'fulfilled');
+      expect(fulfilled).toHaveLength(1);
+    });
   });
 
   describe('readStream', () => {

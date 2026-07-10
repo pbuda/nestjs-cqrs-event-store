@@ -1,5 +1,5 @@
 import { Injectable, OnModuleDestroy } from '@nestjs/common';
-import { Long, MongoClient, MongoServerError, MongoTransactionError } from 'mongodb';
+import { Long, MongoClient, MongoServerError } from 'mongodb';
 import {
   IEventStoreAdapter,
   EventEnvelope,
@@ -82,81 +82,70 @@ export class MongoDbEventStoreAdapter
   ): Promise<AppendResult> {
     await this.indexesReady;
     const session = this.client.startSession();
-    let currentRevision = -1n;
+    const col = this.getCollection();
+    const countersCol = this.getCountersCollection();
+
     try {
-      session.startTransaction();
-      const col = this.getCollection();
-      const countersCol = this.getCountersCollection();
+      // withTransaction automatically retries the callback on transient errors —
+      // notably WriteConflict (code 112), which every concurrent append triggers
+      // by contending on the shared globalPosition counter and the unique
+      // { streamId, revision } index. It also retries the commit on
+      // UnknownTransactionCommitResult. The callback re-reads all state on each
+      // attempt, so a retry recomputes the revision and re-allocates positions.
+      return await session.withTransaction(async (): Promise<AppendResult> => {
+        // Find current max revision for the stream
+        const lastDoc = await col.findOne(
+          { streamId },
+          { sort: { revision: -1 }, session, ...BSON_OPTIONS }
+        );
+        const currentRevision = lastDoc
+          ? (lastDoc['revision'] as bigint)
+          : -1n;
 
-      // Find current max revision for the stream
-      const lastDoc = await col.findOne(
-        { streamId },
-        { sort: { revision: -1 }, session, ...BSON_OPTIONS }
-      );
-      currentRevision = lastDoc
-        ? lastDoc['revision'] as bigint
-        : -1n;
-
-      // Explicit concurrency check
-      if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
-        await session.abortTransaction();
-        throw new ConcurrencyConflictError(streamId, expectedRevision, currentRevision);
-      }
-
-      // Atomically allocate global positions for the batch
-      const before = await countersCol.findOneAndUpdate(
-        { _id: 'globalPosition' } as Record<string, unknown>,
-        { $inc: { seq: Long.fromBigInt(BigInt(events.length)) } },
-        { upsert: true, returnDocument: 'before', session, ...BSON_OPTIONS }
-      );
-      const startGlobal = (before?.['seq'] as bigint | undefined) ?? 0n;
-
-      // Build and insert documents
-      const docs = events.map((event, i) => ({
-        streamId,
-        revision: Long.fromBigInt(currentRevision + 1n + BigInt(i)),
-        globalPosition: Long.fromBigInt(startGlobal + BigInt(i)),
-        id: event.id,
-        type: event.type,
-        data: event.data,
-        metadata: event.metadata,
-        created: new Date(),
-      }));
-
-      let committed = false;
-      try {
-        await col.insertMany(docs, { session });
-        await session.commitTransaction();
-        committed = true;
-      } catch (insertError) {
-        if (!committed) {
-          try {
-            await session.abortTransaction();
-          } catch (abortError) {
-            if (abortError instanceof MongoTransactionError) {
-              // abortTransaction rejected because the transaction was already committed
-              // on the server despite commitTransaction() throwing a transient driver error.
-              committed = true;
-            } else {
-              throw abortError;
-            }
-          }
+        // Explicit optimistic-concurrency check. ConcurrencyConflictError carries
+        // no TransientTransactionError label, so withTransaction aborts and
+        // propagates it instead of retrying.
+        if (expectedRevision !== undefined && currentRevision !== expectedRevision) {
+          throw new ConcurrencyConflictError(streamId, expectedRevision, currentRevision);
         }
-        if (!committed) {
+
+        // Atomically allocate global positions for the batch
+        const before = await countersCol.findOneAndUpdate(
+          { _id: 'globalPosition' } as Record<string, unknown>,
+          { $inc: { seq: Long.fromBigInt(BigInt(events.length)) } },
+          { upsert: true, returnDocument: 'before', session, ...BSON_OPTIONS }
+        );
+        const startGlobal = (before?.['seq'] as bigint | undefined) ?? 0n;
+
+        // Build and insert documents
+        const docs = events.map((event, i) => ({
+          streamId,
+          revision: Long.fromBigInt(currentRevision + 1n + BigInt(i)),
+          globalPosition: Long.fromBigInt(startGlobal + BigInt(i)),
+          id: event.id,
+          type: event.type,
+          data: event.data,
+          metadata: event.metadata,
+          created: new Date(),
+        }));
+
+        try {
+          await col.insertMany(docs, { session });
+        } catch (insertError) {
+          // Duplicate key on { streamId, revision }: another writer already
+          // claimed this revision. Non-transient — surface as a concurrency
+          // conflict rather than letting withTransaction retry indefinitely.
           if (insertError instanceof MongoServerError && insertError.code === 11000) {
             throw new ConcurrencyConflictError(streamId, expectedRevision ?? -1n, currentRevision);
           }
           throw insertError;
         }
-        // committed = true: data is written — fall through to return AppendResult
-      }
-    } catch (error) {
-      if (error instanceof ConcurrencyConflictError) throw error;
-      throw error;
+
+        return { nextExpectedRevision: currentRevision + BigInt(events.length) };
+      });
     } finally {
       await session.endSession();
     }
-    return { nextExpectedRevision: currentRevision + BigInt(events.length) };
   }
 
   async *readStream(
